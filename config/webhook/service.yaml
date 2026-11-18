@@ -1,0 +1,18 @@
+# Webhook Service in front of the manager's webhook port (9443).
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-vcr-operator-webhook-service
+  namespace: vllm-vcr-operator-system
+  labels:
+    app.kubernetes.io/name: vllm-vcr-operator
+    app.kubernetes.io/component: webhook
+spec:
+  selector:
+    app.kubernetes.io/name: vllm-vcr-operator
+    control-plane: controller-manager
+  ports:
+    - name: webhook
+      port: 443
+      targetPort: webhook
+      protocol: TCP

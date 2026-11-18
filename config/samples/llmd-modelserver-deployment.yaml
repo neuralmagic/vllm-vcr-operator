@@ -1,0 +1,109 @@
+# An unchanged, GPU-requesting llm-d modelserver Deployment.
+#
+# Adapted from vllm-vcr's deploy/llm-d-prefix-cache/modelserver/deployment.yaml:
+# the llm-d labels, inference/KV-event ports, and probes are preserved, and the
+# workoad is a real vLLM invocation that requests nvidia.com/gpu. It contains no
+# simulator opt-in label, annotation, or container: admission detects the GPU
+# request and rewrites the Pod on creation.
+#
+# Because the fixture requests a GPU, applying it on a cluster *without* the
+# operator leaves the Pod Pending (unschedulable) - that is the intended
+# demonstration, not a broken sample.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-prefix-cache
+  namespace: vllm-vcr-simulated
+  labels:
+    llm-d.ai/guide: precise-prefix-cache-routing
+    llm-d.ai/model: qwen3-0-6b
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      llm-d.ai/guide: precise-prefix-cache-routing
+      llm-d.ai/model: qwen3-0-6b
+  template:
+    metadata:
+      labels:
+        llm-d.ai/guide: precise-prefix-cache-routing
+        llm-d.ai/model: qwen3-0-6b
+        # kv-cache-manager pod reconciler discovers pods with this label.
+        llm-d.ai/inference-serving: "true"
+    spec:
+      serviceAccountName: mock-pc-sa
+      containers:
+        - name: modelserver
+          image: vllm/vllm-openai:v0.33.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - vllm
+            - serve
+          args:
+            - Qwen/Qwen3-0.6B
+            - --served-model-name=Qwen/Qwen3-0.6B
+            - --tensor-parallel-size=1
+            - --max-model-len=32768
+            - --max-num-seqs=16
+            - --enable-prefix-caching
+          env:
+            - name: MODEL
+              value: Qwen/Qwen3-0.6B
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: HF_HOME
+              value: /models
+            - name: HF_HUB_DISABLE_XET
+              value: "1"
+            - name: VLLM_LOGGING_LEVEL
+              value: INFO
+          ports:
+            - name: modelserver
+              containerPort: 8000
+              protocol: TCP
+            - name: kv-events
+              containerPort: 5556
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: modelserver
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: modelserver
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /v1/models
+              port: modelserver
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+              nvidia.com/gpu: "1"
+            limits:
+              memory: 4Gi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+      volumes:
+        - name: model-cache
+          emptyDir:
+            sizeLimit: 20Gi

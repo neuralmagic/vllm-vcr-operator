@@ -1,0 +1,40 @@
+# Local/dev overlay: the default install plus the samples, with locally built
+# images.
+#
+# Build the images from this repository (see config/README.md, "Images"), push
+# them to a registry your cluster can reach, then change the tags below. Nothing
+# else in config/ needs editing.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../default
+  - ../../samples
+
+images:
+  - name: quay.io/opendatahub/vllm-vcr-operator
+    newTag: dev
+
+patches:
+  - target:
+      kind: Deployment
+      name: vllm-vcr-operator-controller-manager
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: vllm-vcr-operator-controller-manager
+      spec:
+        template:
+          spec:
+            containers:
+              - name: manager
+                env:
+                  - name: VCR_FRONTEND_IMAGE
+                    value: quay.io/opendatahub/vllm-vcr-frontend:dev-cpu
+                  - name: VCR_BACKEND_IMAGE
+                    value: quay.io/opendatahub/vllm-vcr-backend:dev
+                  - name: VCR_DEVICE_PLUGIN_IMAGE
+                    value: quay.io/opendatahub/vllm-vcr-device-plugin:dev
+                  - name: VCR_SUPERVISOR_IMAGE
+                    value: quay.io/opendatahub/vllm-vcr-supervisor:dev

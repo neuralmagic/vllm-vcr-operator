@@ -1,0 +1,23 @@
+# CA injection for the admission webhooks.
+#
+# cainjector copies ca.crt from the Certificate's Secret into the caBundle of both
+# registrations. This patch lives in config/default rather than in config/webhook
+# so the base registrations stay usable when certificates are provided by hand
+# (see config/README.md, "Webhook certificates without cert-manager").
+#
+# The annotation value is rewritten by the `replacements` block in this
+# directory's kustomization.yaml, so an overlay that changes the namespace keeps
+# the reference correct.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: vllm-vcr-operator-mutating-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: vllm-vcr-operator-system/vllm-vcr-operator-serving-cert
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: vllm-vcr-operator-validating-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: vllm-vcr-operator-system/vllm-vcr-operator-serving-cert

@@ -1,0 +1,18 @@
+# Admission registration for the operator.
+#
+# The registrations are hand-written rather than generated from kubebuilder
+# markers: failurePolicy, the namespace selector, and cert-manager CA injection
+# are install decisions, not API decisions. hack/verify-manifests.sh fails if
+# controller-gen starts producing config/webhook/manifests.yaml from markers, so
+# the two can never silently diverge.
+#
+# Paths match the constants registered by internal/webhook (ticket 08):
+#   /mutate-v1-pod
+#   /validate-vcr-opendatahub-io-v1alpha1-simulationenvironment
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - service.yaml
+  - mutating_webhook.yaml
+  - validating_webhook.yaml

@@ -1,0 +1,15 @@
+# RBAC for the operator manager.
+#
+# The ClusterRole content here covers everything the operator touches. RBAC
+# markers in internal/controller and internal/webhook also feed this file when
+# `make manifests` regenerates it; hack/verify-manifests.sh fails if either the
+# applied rule set or the marker-derived file loses a required permission.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - service_account.yaml
+  - role.yaml
+  - role_binding.yaml
+  - leader_election_role.yaml
+  - leader_election_role_binding.yaml

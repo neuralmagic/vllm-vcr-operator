@@ -1,0 +1,23 @@
+# Webhook serving certificate.
+#
+# secretName is consumed twice, so the two references must be kept in sync:
+#   - config/manager/manager.yaml mounts it at /tmp/k8s-webhook-server/serving-certs
+#   - the cert-manager.io/inject-ca-from annotation in config/default/webhook_patch.yaml
+#     makes cainjector publish ca.crt into both webhook registrations
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: vllm-vcr-operator-serving-cert
+  namespace: vllm-vcr-operator-system
+  labels:
+    app.kubernetes.io/name: vllm-vcr-operator
+spec:
+  dnsNames:
+    - vllm-vcr-operator-webhook-service.vllm-vcr-operator-system.svc
+    - vllm-vcr-operator-webhook-service.vllm-vcr-operator-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: vllm-vcr-operator-selfsigned-issuer
+  secretName: vllm-vcr-operator-webhook-server-cert
+  duration: 8760h
+  renewBefore: 360h

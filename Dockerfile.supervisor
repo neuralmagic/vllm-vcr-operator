@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1
+# Lifecycle supervisor image: `vcr-supervisor` is the entrypoint of the injected
+# frontend container (docs/contracts/runtime-layout.md), so it must live in the
+# Docker image that also carries the Python vLLM frontend.
+#
+# Targets:
+#   --target frontend    (recommended) the CPU vLLM frontend plus the supervisor at
+#                        /usr/local/bin/vcr-supervisor. This is what
+#                        VCR_FRONTEND_IMAGE must point at.
+#   --target supervisor  (default) a minimal image that only contains the
+#                        supervisor. Useful as a COPY source and for debugging, not
+#                        runnable on its own because the frontend is missing.
+#
+# Examples:
+#   docker build -f Dockerfile.supervisor --target frontend \
+#     --build-arg FRONTEND_IMAGE=quay.io/opendatahub/vllm-vcr-frontend-base:0.33.0-cpu \
+#     -t quay.io/opendatahub/vllm-vcr-frontend:v0.33.0-cpu .
+#   docker build -f Dockerfile.supervisor --target supervisor \
+#     -t quay.io/opendatahub/vllm-vcr-supervisor:v0.33.0 .
+#
+# Build args (declared before the first FROM so they can be used in FROM lines):
+#   GO_VERSION      Go toolchain; must satisfy go.mod (default 1.26)
+#   FRONTEND_IMAGE  CPU-only vLLM frontend image used by the `frontend` target
+#                   (default python:3.12-slim: a placeholder that has no vLLM)
+#   BASE_IMAGE      runtime base for the `supervisor` target
+#                   (default gcr.io/distroless/static:nonroot)
+#   LD_FLAGS        extra linker flags (default empty)
+ARG GO_VERSION=1.26
+ARG FRONTEND_IMAGE=python:3.12-slim
+ARG BASE_IMAGE=gcr.io/distroless/static:nonroot
+
+FROM --platform=${BUILDPLATFORM} golang:${GO_VERSION} AS builder
+ARG TARGETOS
+ARG TARGETARCH
+ARG LD_FLAGS
+WORKDIR /src
+ENV CGO_ENABLED=0
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
+    go build -trimpath -ldflags="-s -w ${LD_FLAGS}" -o /out/vcr-supervisor ./cmd/supervisor
+
+# Runnable frontend image: the CPU vLLM frontend with the supervisor entrypoint.
+FROM ${FRONTEND_IMAGE} AS frontend
+COPY --from=builder /out/vcr-supervisor /usr/local/bin/vcr-supervisor
+ENTRYPOINT ["/usr/local/bin/vcr-supervisor"]
+
+# Standalone supervisor (COPY source / diagnostics). Last stage so it is the
+# default target; it cannot serve anything without the frontend image above.
+FROM ${BASE_IMAGE} AS supervisor
+COPY --from=builder /out/vcr-supervisor /usr/local/bin/vcr-supervisor
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/vcr-supervisor"]

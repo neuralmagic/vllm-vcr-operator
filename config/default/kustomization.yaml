@@ -1,0 +1,73 @@
+# Default install: CRD, RBAC, manager, webhook registrations, and cert-manager
+# issued webhook certificates.
+#
+# Install order (`hack/install.sh` does this):
+#   1. CRD                      (must exist before a SimulationEnvironment is applied)
+#   2. operator namespace, RBAC, webhook Service
+#   3. cert-manager Issuer + Certificate (or a pre-created Secret, see README.md)
+#   4. manager Deployment       (needs the certificate Secret to start)
+#   5. webhook registrations    (fail-closed: apply them only once the manager is up)
+# Steps 1-4 are safe to apply in one pass; hack/install.sh applies the webhook
+# registrations (step 5) separately after the manager rollout succeeds.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: vllm-vcr-operator-system
+
+resources:
+  - namespace.yaml
+  - ../crd
+  - ../rbac
+  - ../manager
+  - ../webhook
+  - ../certmanager
+
+patches:
+  # Adds the cert-manager CA injection annotation to both registrations.
+  - path: webhook_patch.yaml
+
+# Keep the inject-ca-from annotation (namespace/name) correct if an overlay
+# changes the operator namespace: the two halves come from the Certificate itself.
+replacements:
+  - source:
+      kind: Certificate
+      name: vllm-vcr-operator-serving-cert
+      fieldPath: metadata.namespace
+    targets:
+      - select:
+          kind: MutatingWebhookConfiguration
+          name: vllm-vcr-operator-mutating-webhook
+        fieldPaths:
+          - metadata.annotations.[cert-manager.io/inject-ca-from]
+        options:
+          delimiter: /
+          index: 0
+      - select:
+          kind: ValidatingWebhookConfiguration
+          name: vllm-vcr-operator-validating-webhook
+        fieldPaths:
+          - metadata.annotations.[cert-manager.io/inject-ca-from]
+        options:
+          delimiter: /
+          index: 0
+  - source:
+      kind: Certificate
+      name: vllm-vcr-operator-serving-cert
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: MutatingWebhookConfiguration
+          name: vllm-vcr-operator-mutating-webhook
+        fieldPaths:
+          - metadata.annotations.[cert-manager.io/inject-ca-from]
+        options:
+          delimiter: /
+          index: 1
+      - select:
+          kind: ValidatingWebhookConfiguration
+          name: vllm-vcr-operator-validating-webhook
+        fieldPaths:
+          - metadata.annotations.[cert-manager.io/inject-ca-from]
+        options:
+          delimiter: /
+          index: 1
