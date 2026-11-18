@@ -1,0 +1,9 @@
+bin/
+dist/
+cover.out
+coverage.html
+*.test
+.DS_Store
+.pi/
+.unipi/
+vllm-vcr-operator-spec.md

@@ -1,0 +1,85 @@
+# Make targets for the vllm-vcr-operator.
+
+SHELL := /bin/bash
+GO ?= go
+CONTROLLER_GEN ?= $(HOME)/go/bin/controller-gen
+ENVTEST ?= $(HOME)/go/bin/setup-envtest
+ENVTEST_BIN_DIR ?= $(HOME)/.local/share/envtest
+ENVTEST_K8S_VERSION ?= 1.34.x
+
+BIN := bin
+MANAGER := $(BIN)/manager
+DEVICE_PLUGIN := $(BIN)/vllm-vcr-device-plugin
+SUPERVISOR := $(BIN)/vcr-supervisor
+PROFILE_EXPORT := $(BIN)/vcr-profile-export
+
+.PHONY: all
+all: build
+
+.PHONY: build
+build: $(MANAGER) $(DEVICE_PLUGIN) $(SUPERVISOR) $(PROFILE_EXPORT)
+
+$(BIN):
+	mkdir -p $(BIN)
+
+$(MANAGER): $(shell find cmd/manager api internal -name '*.go' 2>/dev/null) | $(BIN)
+	$(GO) build -o $@ ./cmd/manager
+
+$(DEVICE_PLUGIN): $(shell find cmd/deviceplugin internal -name '*.go' 2>/dev/null) | $(BIN)
+	$(GO) build -o $@ ./cmd/deviceplugin
+
+$(SUPERVISOR): $(shell find cmd/supervisor internal -name '*.go' 2>/dev/null) | $(BIN)
+	$(GO) build -o $@ ./cmd/supervisor
+
+$(PROFILE_EXPORT): $(shell find cmd/profileexport internal -name '*.go' 2>/dev/null) | $(BIN)
+	$(GO) build -o $@ ./cmd/profileexport
+
+.PHONY: fmt
+fmt:
+	$(GO) fmt ./...
+
+.PHONY: vet
+vet:
+	$(GO) vet ./...
+
+.PHONY: test
+test:
+	$(GO) test ./...
+
+.PHONY: test-unit
+test-unit:
+	$(GO) test $$($(GO) list ./... | grep -v '/test/e2e' | grep -v '/test/spike')
+
+.PHONY: test-e2e
+test-e2e:
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(ENVTEST_BIN_DIR) -p path)" \
+		$(GO) test -count=1 -timeout 20m ./test/e2e/...
+
+.PHONY: test-spike
+test-spike:
+	$(GO) test -count=1 -timeout 30m ./test/spike/...
+
+.PHONY: cover
+cover:
+	$(GO) test -coverprofile=cover.out ./...
+	$(GO) tool cover -func=cover.out | tail -1
+
+.PHONY: verify
+verify: fmt vet test
+
+.PHONY: manifests
+manifests:
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." \
+		output:crd:dir=config/crd/bases output:rbac:dir=config/rbac output:webhook:dir=config/webhook
+
+.PHONY: generate
+generate:
+	$(CONTROLLER_GEN) object:headerFile="" paths="./..."
+
+.PHONY: tidy
+tidy:
+	$(GO) mod tidy
+
+.PHONY: clean
+clean:
+	rm -rf $(BIN) cover.out coverage.html
