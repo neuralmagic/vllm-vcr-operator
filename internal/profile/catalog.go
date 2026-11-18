@@ -132,6 +132,16 @@ func (c *Catalog) Candidates() []Candidate {
 // Selection is all-or-nothing: zero compatible profiles and more than one
 // compatible profile are both rejections. Picking an arbitrary match would make
 // recorded timing and content depend on catalog ordering.
+//
+// Field semantics follow Requirements: an empty optional string or a nil pointer
+// leaves the profile's recorded value standing. Quantization is the exception —
+// an empty value means unquantized and is always compared, so an unquantized
+// workload is never served by a quantized recording. GPU type and device count
+// are never optional: without them no recorded topology can be identified.
+//
+// vLLM compatibility is an exact release match. A profile recorded against a
+// different frontend release cannot be proven compatible, so it is rejected
+// rather than approximated.
 func (c *Catalog) Select(req Requirements) (Selection, error) {
 	if err := req.validate(); err != nil {
 		return Selection{}, err
