@@ -59,6 +59,20 @@ test-e2e:
 test-spike:
 	$(GO) test -count=1 -timeout 30m ./test/spike/...
 
+# test-cluster runs the kind-cluster acceptance suite: the specification's primary
+# acceptance interface (an unchanged GPU-requesting vLLM workload on a CPU-only
+# cluster). It needs the two-node cluster and the locally built images:
+#
+#   hack/kind-up.sh
+#   hack/images.sh --build --stub --load
+#
+# Without them the suite skips and names the missing prerequisite. The suite
+# installs the operator, its webhook certificates, and a test TLS registry itself,
+# and removes them again when it passes. See test/cluster/README.md.
+.PHONY: test-cluster
+test-cluster:
+	$(GO) test -count=1 -timeout 30m ./test/cluster/...
+
 .PHONY: cover
 cover:
 	$(GO) test -coverprofile=cover.out ./...

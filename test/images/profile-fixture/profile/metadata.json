@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "vcr.opendatahub-io/profile/v1",
+  "id": "stub-qwen3-0.6b-h200-tp1-bf16",
+  "model": {
+    "name": "Qwen/Qwen3-0.6B",
+    "revision": "c9340e6f3",
+    "tokenizer": "Qwen/Qwen3-0.6B",
+    "tokenizerRevision": "c9340e6f3"
+  },
+  "gpu": {
+    "type": "H200",
+    "count": 1
+  },
+  "execution": {
+    "tensorParallel": 1,
+    "pipelineParallel": 1,
+    "dtype": "bfloat16",
+    "quantization": ""
+  },
+  "cache": {
+    "blockSize": 64,
+    "enablePrefixCaching": true,
+    "kvBlocks": 2048,
+    "chunkedPrefill": true
+  },
+  "vllm": {
+    "version": "0.33.0"
+  },
+  "coverage": {
+    "maxModelLen": { "min": 1, "max": 131072 },
+    "maxNumSeqs": { "min": 1, "max": 128 },
+    "maxNumBatchedTokens": { "min": 1, "max": 8192 },
+    "longPrefillTokenThreshold": { "min": 0, "max": 4096 },
+    "kvBlocks": { "min": 1, "max": 2048 },
+    "schedulingPolicies": ["fcfs", "priority"],
+    "kvMemoryConversion": false
+  },
+  "trace": {
+    "file": "trace.jsonl.gz",
+    "format": "vllm-vcr/jsonl",
+    "recordedTokens": false,
+    "latencyModel": true,
+    "kvEvents": true
+  },
+  "provisioning": {
+    "entrypoint": ["/bin/sh", "/usr/local/bin/vcr-profile-export-volume"],
+    "metadataFile": "metadata.json",
+    "traceFile": "trace.jsonl.gz"
+  },
+  "capabilities": {
+    "chatCompletions": true,
+    "completions": true,
+    "messages": false,
+    "responses": false,
+    "streaming": true,
+    "toolCallParsers": [],
+    "reasoningParsers": [],
+    "kvEventReplay": false,
+    "metrics": []
+  }
+}
