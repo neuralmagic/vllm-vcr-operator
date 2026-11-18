@@ -86,7 +86,7 @@ func TestFrontendArgumentsRunUnderTheSupervisor(t *testing.T) {
 
 	wantPorts := []corev1.ContainerPort{
 		{Name: "inference", ContainerPort: 8000, Protocol: corev1.ProtocolTCP},
-		{Name: "engine-handshake", ContainerPort: 29550, Protocol: corev1.ProtocolTCP},
+		{Name: "engine-hs", ContainerPort: 29550, Protocol: corev1.ProtocolTCP},
 	}
 	if got := admission.Frontend.Ports; !reflect.DeepEqual(got, wantPorts) {
 		t.Fatalf("frontend ports =\n %v\nwant\n %v", got, wantPorts)

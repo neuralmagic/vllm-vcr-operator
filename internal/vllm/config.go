@@ -79,6 +79,7 @@ const (
 	SettingNodeRank            Setting = "--node-rank"
 	SettingMasterAddr          Setting = "--master-addr"
 	SettingMasterPort          Setting = "--master-port"
+	SettingVLLMRPCTimeout      Setting = "VLLM_RPC_TIMEOUT"
 	SettingWorkerMultiproc     Setting = "VLLM_WORKER_MULTIPROC_METHOD"
 	SettingGPUMemUtilization   Setting = "--gpu-memory-utilization"
 	SettingKVCacheMemoryBytes  Setting = "--kv-cache-memory-bytes"
@@ -146,8 +147,20 @@ const (
 	SettingHFHome              Setting = "HF_HOME"
 	SettingHFOffline           Setting = "HF_HUB_OFFLINE"
 	SettingHFTransformersOffl  Setting = "TRANSFORMERS_OFFLINE"
-	SettingHFToken             Setting = "HF_TOKEN"
-	SettingVLLMAPIKey          Setting = "VLLM_API_KEY"
+
+	// HuggingFace Hub download transport and logging switches. They change how
+	// artifacts are fetched or logged, never which tokenizer artifacts are used
+	// or which token IDs they produce, so a simulated model server preserves them
+	// instead of rejecting the workload.
+	SettingHFDisableXET          Setting = "HF_HUB_DISABLE_XET"
+	SettingHFEnableHFTransfer    Setting = "HF_HUB_ENABLE_HF_TRANSFER"
+	SettingHFDisableProgressBars Setting = "HF_HUB_DISABLE_PROGRESS_BARS"
+	SettingHFDisableTelemetry    Setting = "HF_HUB_DISABLE_TELEMETRY"
+	SettingHFVerbosity           Setting = "HF_HUB_VERBOSITY"
+	SettingHFETagTimeout         Setting = "HF_HUB_ETAG_TIMEOUT"
+	SettingHFDownloadTimeout     Setting = "HF_HUB_DOWNLOAD_TIMEOUT"
+	SettingHFToken               Setting = "HF_TOKEN"
+	SettingVLLMAPIKey            Setting = "VLLM_API_KEY"
 )
 
 // Origin records where an effective value came from.

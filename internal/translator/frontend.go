@@ -86,7 +86,7 @@ func frontendInvocation(cfg *vllm.Config, eff effective, env Environment, preser
 		RemoveEnv: dedupeStrings(removeEnv),
 		Ports: []corev1.ContainerPort{
 			{Name: "inference", ContainerPort: int32(eff.inferencePort), Protocol: corev1.ProtocolTCP},
-			{Name: "engine-handshake", ContainerPort: int32(eff.handshakePort), Protocol: corev1.ProtocolTCP},
+			{Name: "engine-hs", ContainerPort: int32(eff.handshakePort), Protocol: corev1.ProtocolTCP},
 		},
 		CopiedArguments: copied,
 	}

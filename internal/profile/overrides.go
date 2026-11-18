@@ -27,18 +27,18 @@ func ValidateOverrides(req Requirements, m *Metadata) error {
 	}
 
 	var failures []error
-	checkRange := func(setting string, value *int64, coverage *Range) {
+	checkRange := func(setting, flag string, value *int64, coverage *Range) {
 		if value == nil {
 			return
 		}
-		failures = append(failures, validateCoveredValue(m.ID, setting, "coverage."+setting, *value, coverage))
+		failures = append(failures, validateCoveredValue(m.ID, setting, "coverage."+setting, flag, *value, coverage))
 	}
 
-	checkRange("maxModelLen", req.MaxModelLen, m.Coverage.MaxModelLen)
-	checkRange("maxNumSeqs", req.MaxNumSeqs, m.Coverage.MaxNumSeqs)
-	checkRange("maxNumBatchedTokens", req.MaxNumBatchedTokens, m.Coverage.MaxNumBatchedTokens)
-	checkRange("longPrefillTokenThreshold", req.LongPrefillTokenThreshold, m.Coverage.LongPrefillTokenThreshold)
-	checkRange("kvBlocks", req.KVBlocks, m.Coverage.KVBlocks)
+	checkRange("maxModelLen", "--max-model-len", req.MaxModelLen, m.Coverage.MaxModelLen)
+	checkRange("maxNumSeqs", "--max-num-seqs", req.MaxNumSeqs, m.Coverage.MaxNumSeqs)
+	checkRange("maxNumBatchedTokens", "--max-num-batched-tokens", req.MaxNumBatchedTokens, m.Coverage.MaxNumBatchedTokens)
+	checkRange("longPrefillTokenThreshold", "--long-prefill-token-threshold", req.LongPrefillTokenThreshold, m.Coverage.LongPrefillTokenThreshold)
+	checkRange("kvBlocks", "--kv-cache-memory-bytes", req.KVBlocks, m.Coverage.KVBlocks)
 
 	if policy := strings.TrimSpace(req.SchedulingPolicy); policy != "" {
 		if len(m.Coverage.SchedulingPolicies) == 0 {
@@ -59,7 +59,7 @@ func ValidateOverrides(req Requirements, m *Metadata) error {
 				"gpuMemoryUtilization %v is invalid: a memory fraction must be in (0, 1]", *fraction))
 		case !m.Coverage.KVMemoryConversion:
 			failures = append(failures, fmt.Errorf(
-				"gpuMemoryUtilization %v is not authorized: profile %q does not declare coverage.kvMemoryConversion, so simulated KV capacity cannot be derived from a memory fraction",
+				"gpuMemoryUtilization (--gpu-memory-utilization) %v is not authorized: profile %q does not declare coverage.kvMemoryConversion, so simulated KV capacity cannot be derived from a memory fraction",
 				*fraction, m.ID))
 		}
 	}
@@ -67,16 +67,20 @@ func ValidateOverrides(req Requirements, m *Metadata) error {
 	return errors.Join(failures...)
 }
 
-func validateCoveredValue(profileID, setting, coveragePath string, value int64, coverage *Range) error {
+func validateCoveredValue(profileID, setting, coveragePath, flag string, value int64, coverage *Range) error {
+	name := setting
+	if flag != "" {
+		name = fmt.Sprintf("%s (%s)", setting, flag)
+	}
 	if coverage == nil {
 		return fmt.Errorf(
 			"%s %d is not authorized: profile %q does not declare %s (an absent coverage entry is not permission)",
-			setting, value, profileID, coveragePath)
+			name, value, profileID, coveragePath)
 	}
 	if value < coverage.Min || value > coverage.Max {
 		return fmt.Errorf(
 			"%s %d is outside profile %q %s range [%d, %d]: only values inside the recorded coverage are supported",
-			setting, value, profileID, coveragePath, coverage.Min, coverage.Max)
+			name, value, profileID, coveragePath, coverage.Min, coverage.Max)
 	}
 	return nil
 }
