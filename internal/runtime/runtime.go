@@ -40,7 +40,7 @@ const (
 	// supervisorHealthPortName is the container port name of the supervisor's
 	// liveness and readiness endpoint, so the probes are visible in the Pod's
 	// port list.
-	supervisorHealthPortName = "supervisor-health"
+	supervisorHealthPortName = "sup-health"
 
 	// controlStatsPath is the simulator control API surface used as its readiness
 	// probe (vllm-vcr docs/control-api.md: GET /stats).

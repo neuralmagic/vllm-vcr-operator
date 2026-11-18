@@ -102,6 +102,7 @@ func environmentSpecs() []environmentSpec {
 		{variable: "VLLM_DP_RANK_LOCAL", setting: SettingDPRankLocal, apply: integer(func(p *parser) **int { return &p.cfg.Parallel.DataParallel.LocalRank })},
 		{variable: "VLLM_DP_MASTER_IP", setting: SettingDPMasterIP, apply: str(func(p *parser) **string { return &p.cfg.Parallel.DataParallel.MasterIP })},
 		{variable: "VLLM_DP_MASTER_PORT", setting: SettingDPMasterPort, apply: integer(func(p *parser) **int { return &p.cfg.Parallel.DataParallel.MasterPort })},
+		{variable: "VLLM_RPC_TIMEOUT", setting: SettingVLLMRPCTimeout, apply: ignoreEnvValue()},
 		{variable: "VLLM_WORKER_MULTIPROC_METHOD", setting: SettingWorkerMultiproc, apply: str(func(p *parser) **string { return &p.cfg.Parallel.WorkerMultiprocMethod })},
 
 		// Hub settings that decide which tokenizer artifacts are loaded.
@@ -110,7 +111,25 @@ func environmentSpecs() []environmentSpec {
 		{variable: "HF_HOME", setting: SettingHFHome, apply: str(func(p *parser) **string { return &p.cfg.Environment.HFHome })},
 		{variable: "HF_HUB_OFFLINE", setting: SettingHFOffline, apply: boolean(func(p *parser) **bool { return &p.cfg.Environment.HFOffline }, envBoolVLLM)},
 		{variable: "TRANSFORMERS_OFFLINE", setting: SettingHFTransformersOffl, apply: boolean(func(p *parser) **bool { return &p.cfg.Environment.HFOffline }, envBoolVLLM)},
+
+		// Hub transport and logging switches: recorded so the policy layer can
+		// classify them, but they carry no tokenizer or rendering semantics, so
+		// there is nothing to apply. The runtime forwards them unchanged.
+		{variable: "HF_HUB_DISABLE_XET", setting: SettingHFDisableXET, apply: ignoreEnvValue()},
+		{variable: "HF_HUB_ENABLE_HF_TRANSFER", setting: SettingHFEnableHFTransfer, apply: ignoreEnvValue()},
+		{variable: "HF_HUB_DISABLE_PROGRESS_BARS", setting: SettingHFDisableProgressBars, apply: ignoreEnvValue()},
+		{variable: "HF_HUB_DISABLE_TELEMETRY", setting: SettingHFDisableTelemetry, apply: ignoreEnvValue()},
+		{variable: "HF_HUB_VERBOSITY", setting: SettingHFVerbosity, apply: ignoreEnvValue()},
+		{variable: "HF_HUB_ETAG_TIMEOUT", setting: SettingHFETagTimeout, apply: ignoreEnvValue()},
+		{variable: "HF_HUB_DOWNLOAD_TIMEOUT", setting: SettingHFDownloadTimeout, apply: ignoreEnvValue()},
 	}
+}
+
+// ignoreEnvValue is the apply step for a variable with no modelled setting
+// semantics: it is recorded as present (so it is not rejected as unknown) and
+// forwarded unchanged by the runtime.
+func ignoreEnvValue() func(*parser, string) *Rejection {
+	return func(*parser, string) *Rejection { return nil }
 }
 
 // hfTokenEnvVars are the Hub credential spellings the transformers stack reads.

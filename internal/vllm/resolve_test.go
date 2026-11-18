@@ -69,18 +69,15 @@ func TestResolveLLMDWellLitPath(t *testing.T) {
 		wantOrigin(t, cfg, setting, vllm.OriginCLI)
 	}
 
-	// VLLM_RPC_TIMEOUT and HF_HUB_DISABLE_XET are release variables this package
-	// does not model, so the policy layer is told about them by name instead of
-	// the resolver ignoring them.
-	want := []string{"HF_HUB_DISABLE_XET", "VLLM_RPC_TIMEOUT"}
-	if len(cfg.Environment.Unmodeled) != len(want) {
-		t.Fatalf("unmodelled environment = %v, want %v", cfg.Environment.Unmodeled, want)
+	// The llm-d well-lit-path manifest carries HF_HUB_DISABLE_XET (a Hub download
+	// transport switch) and VLLM_RPC_TIMEOUT (the frontend's engine-handshake
+	// timeout). Both are modelled as preserved settings: rejecting either would
+	// mean a real GPU-targeted manifest could not be submitted unchanged.
+	if len(cfg.Environment.Unmodeled) != 0 {
+		t.Fatalf("unmodelled environment = %v, want none", cfg.Environment.Unmodeled)
 	}
-	for i, name := range want {
-		if cfg.Environment.Unmodeled[i] != name {
-			t.Fatalf("unmodelled environment = %v, want %v", cfg.Environment.Unmodeled, want)
-		}
-	}
+	wantOrigin(t, cfg, vllm.SettingHFDisableXET, vllm.OriginEnv)
+	wantOrigin(t, cfg, vllm.SettingVLLMRPCTimeout, vllm.OriginEnv)
 	wantString(t, "HF cache path", cfg.Environment.HFCachePath, "/hf-cache")
 }
 

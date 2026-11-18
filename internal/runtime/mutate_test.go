@@ -52,7 +52,7 @@ func testAdmission() *plan.Admission {
 			},
 			RemoveEnv: []string{"CUDA_VISIBLE_DEVICES", "VLLM_TARGET_DEVICE"},
 			Ports: []corev1.ContainerPort{
-				{Name: "engine-handshake", ContainerPort: 29550, Protocol: corev1.ProtocolTCP},
+				{Name: "engine-hs", ContainerPort: 29550, Protocol: corev1.ProtocolTCP},
 			},
 			CopiedArguments: []plan.CopiedArgument{
 				{Setting: "--api-key", Spellings: []string{"--api-key"}, TakesValue: true},
@@ -270,7 +270,7 @@ func TestMutateAppliesTheRuntimeLayout(t *testing.T) {
 	if got, want := frontend.Image, "quay.io/opendatahub/vllm-cpu:v0.33.0"; got != want {
 		t.Errorf("frontend image = %q, want %q", got, want)
 	}
-	if len(frontend.Ports) != 3 || frontend.Ports[0].Name != "modelserver" || frontend.Ports[1].Name != "engine-handshake" {
+	if len(frontend.Ports) != 3 || frontend.Ports[0].Name != "modelserver" || frontend.Ports[1].Name != "engine-hs" {
 		t.Errorf("frontend ports = %v, want the preserved inference port, the handshake port, and the supervisor health port", frontend.Ports)
 	}
 	if out.Labels["llm-d.ai/inference-serving"] != "true" {
