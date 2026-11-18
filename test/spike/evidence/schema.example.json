@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "vcr.opendatahub-io/spike-evidence/v1",
+  "spike": "runtime-layout",
+  "startedAt": "2026-01-01T00:00:00Z",
+  "finishedAt": "2026-01-01T00:03:12Z",
+  "images": {
+    "frontend": "registry.example/vllm-vcr-frontend:v0.33.0-cpu",
+    "backend": "registry.example/vllm-vcr-backend:v0.33.0",
+    "profile": "registry.example/vllm-vcr-profiles:qwen3-0.6b-h200-tp1-bf16"
+  },
+  "environment": {
+    "engine": "podman",
+    "model": "Qwen/Qwen3-0.6B",
+    "profileSource": "image",
+    "profileDir": "/tmp/vcr-spike-1234/profile",
+    "handshakeAddress": "tcp://127.0.0.1:29550",
+    "inferenceURL": "http://127.0.0.1:8000",
+    "controlURL": "http://127.0.0.1:8001"
+  },
+  "steps": [
+    {
+      "name": "provisioner exported metadata and trace",
+      "startedAt": "2026-01-01T00:00:01Z",
+      "finishedAt": "2026-01-01T00:00:04Z",
+      "outcome": "passed"
+    },
+    {
+      "name": "frontend is not ready before the simulator registers",
+      "startedAt": "2026-01-01T00:00:04Z",
+      "finishedAt": "2026-01-01T00:00:22Z",
+      "outcome": "passed",
+      "detail": "ready marker absent for 18s; /readyz answered 503"
+    },
+    {
+      "name": "frontend becomes ready after the simulator registers",
+      "startedAt": "2026-01-01T00:00:22Z",
+      "finishedAt": "2026-01-01T00:00:31Z",
+      "outcome": "passed",
+      "detail": "ready marker present 8.4s after the simulator started"
+    },
+    {
+      "name": "readiness is withdrawn when the simulator is lost",
+      "startedAt": "2026-01-01T00:00:31Z",
+      "finishedAt": "2026-01-01T00:00:37Z",
+      "outcome": "passed",
+      "detail": "ready marker removed 0.4s after the backend was killed"
+    },
+    {
+      "name": "coordinated SIGTERM shutdown exits zero within the shutdown timeout",
+      "startedAt": "2026-01-01T00:00:37Z",
+      "finishedAt": "2026-01-01T00:00:52Z",
+      "outcome": "passed",
+      "detail": "supervisor exited 0 after 4.1s with a 20s budget"
+    }
+  ],
+  "observations": [
+    {
+      "name": "restart recovery",
+      "detail": "an independently restarted simulator registered again only after the frontend was restarted; the pinned images did not reconnect"
+    }
+  ],
+  "notDemonstrated": [
+    "GPU hardware behavior: the run used no NVIDIA device",
+    "timing fidelity: the profile's recorded latency was served unchanged and was not compared with a fresh capture"
+  ],
+  "passed": false
+}
