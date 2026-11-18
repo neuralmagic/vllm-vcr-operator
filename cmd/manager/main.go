@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
+	"github.com/opendatahub-io/vllm-vcr-operator/internal/controller"
 )
 
 var (
@@ -73,9 +74,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	_ = operatorNS
+	environmentReconciler, err := controller.NewSimulationEnvironmentReconciler(controller.Options{
+		Client:            mgr.GetClient(),
+		OperatorNamespace: operatorNS,
+		DevicePluginImage: controller.DevicePluginImageFromEnv(os.Getenv),
+		Recorder:          mgr.GetEventRecorderFor("simulationenvironment"),
+	})
+	if err != nil {
+		setupLog.Error(err, "unable to create the simulation environment reconciler")
+		os.Exit(1)
+	}
+	if err := environmentReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to register the simulation environment reconciler")
+		os.Exit(1)
+	}
 
-	setupLog.Info("starting manager")
+	setupLog.Info("starting manager", "operatorNamespace", operatorNS)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "manager exited")
 		os.Exit(1)

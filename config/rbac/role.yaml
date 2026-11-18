@@ -34,6 +34,20 @@ rules:
       - update
       - patch
       - delete
+  # Device-plugin reconciliation writes the device-count ConfigMap the plugin
+  # polls, so advertised capacity follows spec.devicesPerNode.
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
   # Device-plugin reconciliation inspects node labels to avoid selecting a node
   # that already advertises nvidia.com/gpu from a real provider.
   - apiGroups:
