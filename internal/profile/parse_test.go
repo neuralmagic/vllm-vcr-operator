@@ -225,6 +225,14 @@ func TestParseRejectsInvalidDocuments(t *testing.T) {
 			wantSub: []string{"vllm.version", "required"},
 		},
 		{
+			// The simulator compares the recorded hash verbatim against the
+			// trace's meta.config_hash, so a value that is only the schema's
+			// algorithm tag would silently disable the check.
+			name:    "config hash carries only the algorithm tag",
+			mutate:  func(doc map[string]any) { set(doc, []string{"vllm", "configHash"}, "sha256:") },
+			wantSub: []string{"vllm.configHash", "config_hash"},
+		},
+		{
 			name:    "non-positive block size",
 			mutate:  func(doc map[string]any) { set(doc, []string{"cache", "blockSize"}, 0) },
 			wantSub: []string{"cache.blockSize", "greater than 0"},

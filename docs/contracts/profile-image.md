@@ -62,7 +62,7 @@ start when provisioning fails.
     "kvBlocks": 2048,
     "chunkedPrefill": true
   },
-  "vllm": { "version": "0.33.0", "configHash": "sha256:..." },
+  "vllm": { "version": "0.33.0", "configHash": "3f6c...bare-hex-sha256" },
   "coverage": {
     "maxModelLen": { "min": 1, "max": 131072 },
     "maxNumSeqs": { "min": 1, "max": 128 },
@@ -112,9 +112,22 @@ start when provisioning fails.
 - `capabilities` is the validated serving surface produced by the
   serving-behavior spike. A flag being accepted by the frontend or simulator is
   not evidence of support; only entries here authorize serving features.
+- `vllm.version` is the vLLM release the trace was captured against, and
+  `vllm.configHash` is the trace's recorded `meta.config_hash` copied verbatim: a
+  bare lowercase-hex SHA-256. The simulator compares that string as an opaque
+  value and never recomputes it, so a profile whose hash carries the `sha256:`
+  algorithm tag has it removed before `--expect-config-hash` is passed (the tag
+  names an algorithm; it is not part of the recorded value). A `configHash` that
+  is empty after the tag is rejected, because it would silently disable the check.
 - `trace.recordedTokens` distinguishes content-identical replay from random-token
   output. Random tokens are valid for protocol and routing tests; content
   assertions require `recordedTokens`.
+- A `capabilities.contentReplay` profile must also record per-request
+  `block_hashes` in its trace: live clients name requests however they like, so
+  replay matches the prompt's longest block-hash prefix
+  (`--replay-match prefix`), and the simulator refuses to start in prefix mode
+  against a trace without them. The operator never reads the trace, so it cannot
+  verify this from metadata; the profile producer must.
 - `capabilities.kvEventReplay` must be true before replay-based recovery tests
   can be claimed. The current simulator publishes live KV events but has no
   replay endpoint.

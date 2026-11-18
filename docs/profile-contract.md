@@ -66,7 +66,7 @@ Annotated example — the authoritative schema is
                  "dtype": "bfloat16", "quantization": "" },
   "cache":   { "blockSize": 64, "enablePrefixCaching": true,
                "kvBlocks": 2048, "chunkedPrefill": true },
-  "vllm":    { "version": "0.33.0", "configHash": "sha256:..." },
+  "vllm":    { "version": "0.33.0", "configHash": "3f6c...bare-hex-sha256" },
   "coverage": {
     "maxModelLen":               { "min": 1, "max": 131072 },
     "maxNumSeqs":                { "min": 1, "max": 128 },

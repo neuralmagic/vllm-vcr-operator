@@ -14,6 +14,28 @@ import (
 // the declared file must carry a matching extension.
 const TraceFormatJSONL = "vllm-vcr/jsonl"
 
+// ConfigHashAlgorithmPrefix is the algorithm tag the profile schema permits in
+// front of vllm.configHash (docs/contracts/profile-image.md).
+const ConfigHashAlgorithmPrefix = "sha256:"
+
+// ConfigHashValue returns the vllm.configHash value the simulator's
+// --expect-config-hash compares against a trace's meta.config_hash.
+//
+// vllm-vcr stamps a bare lowercase-hex SHA-256 into the trace header and compares
+// the stamped string verbatim, never recomputing it (crates/sim-trace/src/
+// config_hash.rs:62-70, src/lib.rs:604-641). The profile schema permits the
+// optional "sha256:" algorithm tag, which names the algorithm rather than forming
+// part of the recorded value, so it is removed here. A hash recorded without the
+// tag is returned unchanged.
+func ConfigHashValue(recorded string) string {
+	value := strings.TrimSpace(recorded)
+	if len(value) >= len(ConfigHashAlgorithmPrefix) &&
+		strings.EqualFold(value[:len(ConfigHashAlgorithmPrefix)], ConfigHashAlgorithmPrefix) {
+		value = strings.TrimSpace(value[len(ConfigHashAlgorithmPrefix):])
+	}
+	return value
+}
+
 // Parse decodes and validates a profile metadata document.
 //
 // Validation is strict by contract: a document that cannot be fully understood
@@ -96,6 +118,10 @@ func (m *Metadata) validate() error {
 
 	if strings.TrimSpace(m.VLLM.Version) == "" {
 		return errors.New("vllm.version is required: profile compatibility cannot be verified without it")
+	}
+	if m.VLLM.ConfigHash != "" && ConfigHashValue(m.VLLM.ConfigHash) == "" {
+		return errors.New("vllm.configHash must not be empty after its optional algorithm tag: " +
+			"it is compared verbatim against the trace's recorded meta.config_hash")
 	}
 
 	if strings.TrimSpace(m.Trace.Format) == "" {
