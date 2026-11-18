@@ -177,11 +177,6 @@ func (s Settings) ReadinessURL() string {
 	return "http://" + SupervisorHealthAddress + "/readyz"
 }
 
-// HealthURL is the supervisor's liveness endpoint.
-func (s Settings) HealthURL() string {
-	return "http://" + SupervisorHealthAddress + "/healthz"
-}
-
 // FrontendCommand is the frontend container's argument tail: the supervisor runs
 // the Python vLLM frontend, which binds the engine-core handshake and waits for
 // the simulator to register.

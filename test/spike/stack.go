@@ -70,18 +70,19 @@ func NewStack(tb testing.TB, env Environment) *Stack {
 		tb.Fatalf("create runtime directory: %v", err)
 	}
 	stack.settings = Settings{
-		FrontendImage:    env.FrontendImage,
-		BackendImage:     env.BackendImage,
-		ProfileImage:     env.ProfileImage,
-		ProfileDir:       stack.profileDir,
-		Model:            env.Model,
-		InferencePort:    names.DefaultInferencePort,
-		HandshakeAddress: fmt.Sprintf("tcp://127.0.0.1:%d", names.HandshakePort),
-		ControlPort:      names.ControlPort,
-		KVEventsPort:     names.KVEventsPort,
-		ReadyFile:        filepath.Join(stack.runtimeDir, "ready"),
-		ShutdownTimeout:  DefaultShutdownTimeout,
-		BackendLossGrace: DefaultBackendLossGrace,
+		FrontendImage:         env.FrontendImage,
+		BackendImage:          env.BackendImage,
+		ProfileImage:          env.ProfileImage,
+		ProfileDir:            stack.profileDir,
+		Model:                 env.Model,
+		InferencePort:         names.DefaultInferencePort,
+		HandshakeAddress:      fmt.Sprintf("tcp://127.0.0.1:%d", names.HandshakePort),
+		ControlPort:           names.ControlPort,
+		KVEventsPort:          names.KVEventsPort,
+		ReadyFile:             filepath.Join(stack.runtimeDir, "ready"),
+		ShutdownTimeout:       DefaultShutdownTimeout,
+		BackendLossGrace:      DefaultBackendLossGrace,
+		ProvisionerEntrypoint: []string{defaultProvisionerEntrypoint},
 	}
 	return stack
 }
@@ -101,15 +102,6 @@ func (s *Stack) EnableKVEvents() { s.settings.EnableKVEvents = true }
 // ProfileDir is the host directory holding the exported profile.
 func (s *Stack) ProfileDir() string { return s.profileDir }
 
-// EvidenceEnvironment fills in the endpoints the evidence document records.
-func (s *Stack) EvidenceEnvironment(environment EnvironmentEvidence) EnvironmentEvidence {
-	environment.ProfileDir = s.profileDir
-	environment.HandshakeAddress = s.settings.HandshakeAddress
-	environment.InferenceURL = s.settings.InferenceURL()
-	environment.ControlURL = s.settings.ControlURL()
-	return environment
-}
-
 // Provision exports the profile the run serves.
 //
 // With a profile image, the image's provisioning entrypoint runs exactly as the
@@ -122,11 +114,10 @@ func (s *Stack) Provision(ctx context.Context) error {
 	}
 
 	if s.env.ProfileImage != "" {
-		command := []string{defaultProvisionerEntrypoint, names.ProfileMountPath}
 		exitCode, err := s.runner.Run(ctx, Container{
 			Name:  "vcr-spike-provisioner",
 			Image: s.env.ProfileImage,
-			Args:  command,
+			Args:  s.settings.ProvisionerCommand(),
 			Mounts: []Mount{
 				{Source: s.profileDir, Target: names.ProfileMountPath},
 			},

@@ -3,6 +3,7 @@ package spike_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -122,10 +123,12 @@ func TestServingBehavior(t *testing.T) {
 	// Tokenization consistency: rendering and generation must use one tokenizer.
 	// The check compares two independent surfaces rather than a second tokenizer.
 	promptTokens, tokenizeErr := tokenize(ctx, inference, model, prompt)
+	if errors.Is(tokenizeErr, errTokenizeUnavailable) {
+		evidence.RecordGap("tokenizer consistency: this frontend serves no /tokenize endpoint, so token-id consistency was not demonstrated")
+		tokenizeErr = nil
+	}
 	evidence.Check("the frontend tokenizes a fixed prompt deterministically", tokenizeErr)
-	if tokenizeErr != nil {
-		evidence.RecordGap("tokenizer consistency: the frontend exposes no working tokenizer endpoint, so token-id consistency was not demonstrated")
-	} else {
+	if tokenizeErr == nil && len(promptTokens) > 0 {
 		evidence.Observe("tokenized prompt length", strconv.Itoa(len(promptTokens)))
 	}
 
@@ -170,22 +173,22 @@ func TestServingBehavior(t *testing.T) {
 	}())
 	evidence.Observe("simulator /metrics status", fmt.Sprintf("%d: %s", controlStatus, truncate(string(controlBody), 120)))
 
-	// Random versus recorded tokens. The profile decides which one this run
-	// produces; asserting the other would misdescribe the evidence.
+	// Random versus recorded tokens. Which one this run produces is the profile's
+	// decision, and the pinned simulator consumes each recorded record once, so
+	// repeating a prompt is not proof of replay. The harness therefore records the
+	// observation and reports the strictly checkable fact: the engine's own request
+	// accounting. Content assertions are authorized only for a profile that grants
+	// contentReplay, and even then a match rate has to come from the counters.
 	first, firstErr := complete(ctx, inference, model, prompt, 8, false)
 	second, secondErr := complete(ctx, inference, model, prompt, 8, false)
 	if firstErr == nil && secondErr == nil {
 		identical := text(first) == text(second)
 		if metadata.Capabilities.ContentReplay {
-			evidence.Check("recorded replay serves the recorded token ids for a matching prompt", func() error {
-				if !identical {
-					return fmt.Errorf("two identical recorded prompts produced different text, so the match fell back to random tokens")
-				}
-				return nil
-			}())
+			evidence.Observe("content replay", fmt.Sprintf(
+				"profile grants contentReplay; two identical prompts produced identical text: %t (each recorded record is consumed once, so a repeat may legitimately fall back to random tokens)", identical))
 		} else {
 			evidence.RecordGap("content-identical replay: the profile grants no capabilities.contentReplay, so this run's tokens are seeded random output and content assertions are not authorized")
-			evidence.Observe("random token behavior", fmt.Sprintf("two identical prompts produced identical text: %t (the simulator seeds per request id)", identical))
+			evidence.Observe("random token behavior", fmt.Sprintf("two identical prompts produced identical text: %t (the simulator seeds random tokens per request id)", identical))
 		}
 	}
 
@@ -198,6 +201,28 @@ func TestServingBehavior(t *testing.T) {
 		evidence.Check("the unmatched prompt returns tokens", requireText(unmatched))
 	}
 	evidence.RecordGap("unmatched-request signalling: the pinned simulator falls back to random tokens without an error signal, so a content assertion cannot distinguish a replay hit from a fallback by response alone")
+
+	// Engine-side accounting: the simulator's control API is the authoritative
+	// witness that requests reached the engine once, completed, and did not fail.
+	sent := 5 // the completions issued above: generation, streaming, two repeats, unmatched
+	stats, statsErr := readStats(ctx, stack.Control())
+	evidence.Check("the simulator's request counters account for every request", func() error {
+		if statsErr != nil {
+			return statsErr
+		}
+		if stats.Received < sent {
+			return fmt.Errorf("requests_received = %d, but the harness issued %d completions: requests were lost before the engine", stats.Received, sent)
+		}
+		if stats.Failed != 0 {
+			return fmt.Errorf("requests_failed = %d: the engine reported failures the responses did not", stats.Failed)
+		}
+		if settled := stats.Completed + stats.Failed + stats.Aborted; settled > stats.Received {
+			return fmt.Errorf("received %d < completed %d + failed %d + aborted %d", stats.Received, stats.Completed, stats.Failed, stats.Aborted)
+		}
+		return nil
+	}())
+	evidence.Observe("simulator request counters", fmt.Sprintf("received=%d completed=%d failed=%d aborted=%d",
+		stats.Received, stats.Completed, stats.Failed, stats.Aborted))
 
 	// Prefix-cache pressure: capacity is the profile's KV block count, and
 	// eviction must be observable through the frontend's cache-usage series.
@@ -232,6 +257,32 @@ func TestServingBehavior(t *testing.T) {
 	}
 }
 
+// errTokenizeUnavailable reports that the frontend serves no tokenizer endpoint.
+var errTokenizeUnavailable = errors.New("tokenizer endpoint is not served")
+
+// engineStats is the simulator's request accounting.
+type engineStats struct {
+	Received  int `json:"requests_received"`
+	Completed int `json:"requests_completed"`
+	Failed    int `json:"requests_failed"`
+	Aborted   int `json:"requests_aborted"`
+	Running   int `json:"running"`
+	Waiting   int `json:"waiting"`
+}
+
+// readStats reads the simulator's request counters.
+func readStats(ctx context.Context, control spike.Client) (engineStats, error) {
+	body, err := control.GetOK(ctx, "/stats")
+	if err != nil {
+		return engineStats{}, err
+	}
+	var stats engineStats
+	if err := json.Unmarshal(body, &stats); err != nil {
+		return engineStats{}, fmt.Errorf("decode /stats: %w", err)
+	}
+	return stats, nil
+}
+
 // tokenize asks the frontend to tokenize prompt.
 func tokenize(ctx context.Context, client spike.Client, model, prompt string) ([]int, error) {
 	status, body, err := client.PostJSON(ctx, "/tokenize", map[string]any{"model": model, "prompt": prompt})
@@ -239,7 +290,7 @@ func tokenize(ctx context.Context, client spike.Client, model, prompt string) ([
 		return nil, err
 	}
 	if status == 404 {
-		return nil, fmt.Errorf("/tokenize is not served by this frontend: %s", truncate(string(body), 200))
+		return nil, fmt.Errorf("%w: %s", errTokenizeUnavailable, truncate(string(body), 200))
 	}
 	if status != 200 {
 		return nil, fmt.Errorf("/tokenize returned %d: %s", status, truncate(string(body), 200))

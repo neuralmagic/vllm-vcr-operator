@@ -1,0 +1,89 @@
+# Router values for the llm-d precise-prefix-cache-routing guide.
+#
+# Copied from vllm-vcr's deploy/llm-d-prefix-cache/router/precise-prefix-cache-routing.values.yaml.
+# What matters for this operator's integration path:
+#
+#   * `matchLabels: llm-d.ai/guide=precise-prefix-cache-routing` selects the
+#     fixture modelserver Pods (test/fixtures/llmd/);
+#   * `podDiscoveryConfig.socketPort: 5556` is the KV-event port the simulated
+#     modelserver publishes on (internal/names.KVEventsPort);
+#   * `tokenProcessorConfig.blockSize: 64` must equal the profile's recorded
+#     cache.blockSize, which the operator passes to the simulator as
+#     --tokens-per-block. A mismatch makes the router's block hashes disagree with
+#     the publisher's, so prefix matches silently stop happening;
+#   * the scorer list (kv-cache-utilization, queue, prefix-cache, no-hit-lru)
+#     reads vllm:* series that the Python frontend exposes. The simulator exposes
+#     no metrics of its own, so a Pod whose frontend is not up contributes no
+#     series.
+#
+# This file is a reference for the integration test path, not an installation
+# artifact: installing the llm-d router is outside this repository (see
+# test/fixtures/README.md).
+router:
+  tokenizer:
+    enabled: true
+    modelName: Qwen/Qwen3-0.6B
+
+  epp:
+    replicas: 1
+    pluginsConfigFile: "precise-prefix-cache-routing-plugins.yaml"
+    pluginsCustomConfig:
+      precise-prefix-cache-routing-plugins.yaml: |
+        apiVersion: llm-d.ai/v1alpha1
+        kind: EndpointPickerConfig
+        plugins:
+          - type: token-producer
+            parameters:
+              modelName: Qwen/Qwen3-0.6B
+              vllm:
+                url: "http://localhost:8000"
+          - type: endpoint-notification-source
+          - type: precise-prefix-cache-producer
+            parameters:
+              tokenProcessorConfig:
+                blockSize: 64
+              speculativeIndexing: true
+              indexerConfig:
+                kvBlockIndexConfig:
+                  enableMetrics: true
+              kvEventsConfig:
+                topicFilter: "kv@"
+                concurrency: 8
+                discoverPods: true
+                podDiscoveryConfig:
+                  socketPort: 5556
+          - type: prefix-cache-scorer
+            parameters:
+              prefixMatchInfoProducerName: precise-prefix-cache-producer
+          - type: kv-cache-utilization-scorer
+          - type: queue-scorer
+          - type: no-hit-lru-scorer
+        dataLayer:
+          sources:
+            - pluginRef: endpoint-notification-source
+              extractors:
+                - pluginRef: precise-prefix-cache-producer
+        schedulingProfiles:
+          - name: default
+            plugins:
+              - pluginRef: kv-cache-utilization-scorer
+                weight: 2.0
+              - pluginRef: queue-scorer
+                weight: 2.0
+              - pluginRef: prefix-cache-scorer
+                weight: 3.0
+              - pluginRef: no-hit-lru-scorer
+                weight: 2.0
+
+  extraServicePorts:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: 8081
+
+  modelServers:
+    type: vllm
+    targetPorts:
+      - number: 8000
+    matchLabels:
+      llm-d.ai/guide: "precise-prefix-cache-routing"

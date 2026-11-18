@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 )
 
 // Runner runs the spike's container images with a container engine.
@@ -103,12 +102,6 @@ func (r Runner) SignalArgs(name, sig string) []string {
 // and its anonymous volumes.
 func (r Runner) RemoveArgs(name string) []string {
 	return []string{r.Bin, "rm", "--force", "--volumes", name}
-}
-
-// LogsArgs returns the engine argv that prints the named container's combined
-// output, which the harness keeps as the failure diagnostic.
-func (r Runner) LogsArgs(name string) []string {
-	return []string{r.Bin, "logs", name}
 }
 
 // Start runs c in a background process and returns a handle to it.
@@ -216,18 +209,6 @@ func (h *Handle) Signal(ctx context.Context, sig syscall.Signal) error {
 		return fmt.Errorf("spike: signal container %q: %w: %s", h.name, err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-// Terminate sends SIGTERM and waits up to timeout for the container to exit,
-// reporting the observed exit code. It returns an error only when the container
-// outlived timeout, which is itself a finding about the pinned images.
-func (h *Handle) Terminate(ctx context.Context, timeout time.Duration) (int, error) {
-	if err := h.Signal(ctx, syscall.SIGTERM); err != nil {
-		return -1, err
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return h.Wait(waitCtx)
 }
 
 // Kill removes the container immediately, used to simulate an abrupt loss such
