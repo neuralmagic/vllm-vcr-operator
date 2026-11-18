@@ -79,11 +79,13 @@ deterministic and never invents support:
   the plan records a warning.
 - **KV capacity.** `--num-gpu-blocks-override` maps directly onto the simulator's
   `--kv-cache-size` inside `coverage.kvBlocks`. A memory fraction
-  (`--gpu-memory-utilization`) or a byte budget (`--kv-cache-memory-bytes`) is
-  accepted only for a profile that declares `coverage.kvMemoryConversion`, because
-  capacity is never inferred from a percentage alone; the simulated capacity is then
-  the profile's recorded `cache.kvBlocks`, which is what its validated conversion
-  produced.
+  (`--gpu-memory-utilization`) is accepted only for a profile that declares
+  `coverage.kvMemoryConversion`, because capacity is never inferred from a
+  percentage alone; the simulated capacity is then the profile's recorded
+  `cache.kvBlocks`, which is what its validated conversion produced, and the plan
+  carries a warning saying so. A byte budget (`--kv-cache-memory-bytes`) is
+  rejected: this release has no validated bytes → blocks conversion, so accepting
+  it would have no effect while implying one.
 - **Timing.** Timing always comes from the profile's latency trace. A profile whose
   metadata records no latency model is rejected: serving on synthetic timing would
   misrepresent the recorded hardware.
@@ -118,7 +120,7 @@ additionally enforces:
 | `--tensor-parallel-size` different from the requested device count, or from the recorded topology | Rejected |
 | Requested devices above `spec.devicesPerNode` | Rejected: the request cannot be scheduled on a simulation node |
 | Ports colliding inside the Pod network namespace (inference, handshake, control API, KV events) | Rejected |
-| `coverage.kvMemoryConversion` absent while a memory fraction or byte budget is set | Rejected |
+| `coverage.kvMemoryConversion` absent while a memory fraction is set | Rejected |
 | Profile capability required by a selection (`lora`, `speculativeDecoding`, `multimodal`, `embeddings`, `structuredOutputs`, `disaggregatedPrefill`, `kvEventReplay`, specific tool/reasoning parsers) not granted | Rejected, naming the setting that selected the capability |
 
 ## The table
@@ -252,8 +254,8 @@ variable name vLLM reads.
 
 | Setting | Disposition | Treatment |
 | --- | --- | --- |
-| `--gpu-memory-utilization` | require-profile | a memory fraction is accepted only when the profile declares coverage.kvMemoryConversion: cache capacity is never inferred from a percentage alone |
-| `--kv-cache-memory-bytes` | require-profile | an explicit KV-cache byte budget is accepted only when the profile declares coverage.kvMemoryConversion, which carries the validated conversion to simulated capacity |
+| `--gpu-memory-utilization` | require-profile | a memory fraction is accepted only when the profile declares coverage.kvMemoryConversion: cache capacity is never inferred from a percentage alone. The simulated capacity is the profile's recorded `cache.kvBlocks`, and the plan says so in a warning |
+| `--kv-cache-memory-bytes` | reject | this release has no validated bytes-to-blocks conversion, so an explicit KV-cache byte budget cannot be applied; the selected profile records its simulated capacity as `cache.kvBlocks` |
 | `--num-gpu-blocks-override` | translate | translated to the simulator's --kv-cache-size within the profile's coverage.kvBlocks |
 | `--cpu-offload-gb` | reject | CPU offload of model weights requires real weight loading and host memory accounting, which the simulated runtime does not perform |
 | `VLLM_CPU_KVCACHE_SPACE` | reject | a CPU KV-cache space selects the CPU target device; the simulated KV capacity comes from the profile |
@@ -392,16 +394,22 @@ service-account identity, takes the layout's documented container name
 supervisor:
 
 ```text
-vcr-supervisor -- vllm serve <model> --host <h> --port <p> \
+vcr-supervisor -- vllm serve <model> --host <h> --port <p> --max-model-len <n> \
     --data-parallel-size 1 --data-parallel-size-local 0 \
     --data-parallel-address 127.0.0.1 --data-parallel-rpc-port <handshake> [<preserved flags>]
 ```
 
 - `--data-parallel-size-local 0` is what makes the frontend wait for an externally
   registered engine instead of starting one. The operator never passes
-  `--tensor-parallel-size`, `--gpu-memory-utilization`, cache sizing, or precision
-  flags to the frontend: the workload's GPU engine is replaced, and the simulator
-  advertises the configuration through the ready response.
+  `--tensor-parallel-size`, `--gpu-memory-utilization`, KV-cache sizing, or
+  precision flags to the frontend: the workload's GPU engine is replaced, and the
+  simulator advertises the configuration through the ready response.
+- `--max-model-len <n>` *is* passed, from the same resolved value the simulator
+  receives. The specification requires the maximum model length to be enforced in
+  the frontend and the simulator: without it the frontend would accept prompts up
+  to the model artifact's own maximum, while the recording only covers the
+  profile's declared bound. It is a limit, not cache sizing: it changes no
+  simulated capacity.
 - `--host` and `--port` are always emitted from the effective value, so an
   environment-derived or CLI-derived endpoint produces exactly one flag.
 - Preserved settings are re-emitted from the resolved configuration (see the table).
@@ -504,11 +512,20 @@ start without profile data.
 
 Replay is the one capability the pinned simulator does not implement: it publishes
 live events and its ready response always reports `replay_endpoint: null`. An explicit
-`replay_endpoint` is therefore accepted only when the profile's capability set grants
-`capabilities.kvEventReplay`, and even then the plan records that a consumer which
-loses the event window cannot be re-synchronized from the engine. Every reconcilable
-profile of this release should declare `kvEventReplay: false`; the capability, not an
-available flag, is the authority.
+`replay_endpoint` is therefore **rejected unconditionally** for this release, and the
+rejection names the pinned build (`names.SupportedSimulatorTag`, `v0.2.5`).
+
+Two gates are encoded, in this order:
+
+1. the pin gate (`simulatorReplaySupport` in `internal/translator/effective.go`)
+   rejects the request because the pinned release has no replay responder. Re-pinning
+   a simulator that implements replay changes this one function;
+2. the profile capability gate (`capabilities.kvEventReplay`) stays behind it as the
+   narrower second gate, so a future release that implements replay still requires a
+   profile that validated it.
+
+No reconcilable profile of this release grants `kvEventReplay`. An explicit replay
+configuration is never ignored.
 
 ## Placement rewrite
 
@@ -539,10 +556,11 @@ available flag, is the authority.
   counterpart is not modelled (`--no-use-tqdm`) and any spelling the release does not
   register at all stay rejections that name the spelling; nothing is accepted as an
   inert no-op.
-- `--kv-cache-memory-bytes` and `--gpu-memory-utilization` are authorized by
-  `coverage.kvMemoryConversion`, but the metadata contract records only the resulting
-  `cache.kvBlocks`, so the simulated capacity is the recorded value rather than a
-  function of the requested number.
+- `--gpu-memory-utilization` is authorized by `coverage.kvMemoryConversion`, but the
+  metadata contract records only the resulting `cache.kvBlocks`, so the simulated
+  capacity is the recorded value rather than a function of the requested fraction;
+  the plan records that in a warning. `--kv-cache-memory-bytes` has no validated
+  conversion at all and is rejected.
 - Simulated capability sets that the serving-behavior spike has not validated must be
   empty: an available frontend flag is not evidence of working end-to-end behavior.
 
@@ -626,11 +644,12 @@ recorded value.
 | `--enable-lora --max-loras 4`, profile grants no LoRA | `--enable-lora: profile "<id>" does not support capability "lora": the profile's validated capability set does not grant it` | Adapter behavior is never faked; the profile must have validated it |
 | `--tool-call-parser hermes`, profile grants no parsers | `--tool-call-parser: profile "<id>" does not support capability "toolCallParser:hermes": the profile's validated capability set does not grant it` | A parser is code and behavior, not a forwarded string |
 | `--speculative-config '{"method":"ngram"}'` | `--speculative-config: profile "<id>" does not support capability "speculativeDecoding": …` | Speculation is not simulated by recording a longer output |
-| `--kv-events-config '{"replay_endpoint":"tcp://0.0.0.0:5557"}'` | `--kv-events-config: profile "<id>" does not support capability "kvEventReplay": …` | A router cannot be told replay exists when the engine has no replay responder |
+| `--kv-events-config '{"replay_endpoint":"tcp://0.0.0.0:5557"}'` | `--kv-events-config: the pinned vllm-vcr release v0.2.5 has no KV-event replay endpoint: its ready response always reports replay_endpoint null, …; remove replay_endpoint or re-pin a simulator release that implements it` | A router cannot be told replay exists when the engine has no replay responder |
 | `--kv-events-config '{"enable_kv_cache_events":true,…}'`, profile `trace.kvEvents` false | `--kv-events-config: profile "<id>" records no KV-cache events (trace.kvEvents is false), so the simulator cannot publish the stream the workload configures` | No empty event stream that a router quietly indexes as "no cache" |
 | `--kv-events-config` with `"buffer_steps": 8` | `--kv-events-config: bufferSteps is not supported: the simulator's publisher has no step buffer to configure` | Publisher tuning is not silently ignored |
 | `--kv-events-config` with an unknown field | `--kv-events-config: field "<name>" is not an event-publisher setting this operator can apply` | A misspelled or newer field cannot be dropped on the floor |
 | `--gpu-memory-utilization 0.9`, profile declares no `coverage.kvMemoryConversion` | `gpuMemoryUtilization 0.9 is not authorized: profile "<id>" does not declare coverage.kvMemoryConversion, so simulated KV capacity cannot be derived from a memory fraction` | Cache capacity is never inferred from a percentage |
+| `--kv-cache-memory-bytes 1073741824` | `--kv-cache-memory-bytes: this release has no validated bytes-to-blocks conversion, so an explicit KV-cache byte budget cannot be applied; the selected profile records its simulated capacity as cache.kvBlocks` | A byte budget is not accepted while it could not change the simulated cache |
 | `--max-num-seqs 512`, `coverage.maxNumSeqs.max = 128` | `maxNumSeqs 512 is not authorized: profile "<id>" does not declare … (an absent coverage entry is not permission)`, or a violated-range message when the entry exists | A recording cannot vouch for a concurrency it never saw |
 | `--max-model-len 131072`, `coverage.maxModelLen.max = 32768` | Rejected as an increase beyond coverage | The frontend and the simulator would advertise a length no recording supports |
 | `--max-model-len` unset, profile declares no bound | `the workload does not set a maximum model length and profile "<id>" declares no coverage.maxModelLen, so no authorized bound exists; declare the setting or extend the profile coverage` | No invented model length |

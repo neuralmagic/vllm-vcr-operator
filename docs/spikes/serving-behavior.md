@@ -124,8 +124,9 @@ Replay: **does not exist.** The simulator's ready response mirrors vLLM's
 PUB with no responder counterpart. The consequence, stated in the specification
 itself: full recovery acceptance cannot be claimed until compatible replay is
 available, and a missing capability is not waived by marking the broader work
-complete. The operator's response is a rejection for an explicit
-`replay_endpoint` unless a profile grants `capabilities.kvEventReplay`.
+complete. The operator's response is an unconditional rejection for an explicit
+`replay_endpoint` while the pinned simulator lacks replay; a profile's
+`capabilities.kvEventReplay` is the narrower gate behind it.
 
 ## Evidence format
 

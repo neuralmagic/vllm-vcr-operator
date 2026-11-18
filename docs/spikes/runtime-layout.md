@@ -125,5 +125,5 @@ demonstrate readiness or shutdown cannot be claimed.
 | Open item | Consequence now | Where it resolves |
 | --- | --- | --- |
 | No reconnection in either process | Every recovery path is a Pod/container restart. A test that restarts one process and expects the other to continue is wrong | Accepted design; the harness records it |
-| KV-event replay missing | Router re-synchronization after a lost event window is impossible; recovery acceptance cannot be claimed | The operator **rejects** an explicit `replay_endpoint` unless a profile grants `capabilities.kvEventReplay`, and no reconcilable profile does |
+| KV-event replay missing | Router re-synchronization after a lost event window is impossible; recovery acceptance cannot be claimed | The operator **rejects** an explicit `replay_endpoint` unconditionally for the pinned simulator release; `capabilities.kvEventReplay` is the narrower gate behind that rejection, and no reconcilable profile grants it |
 | `--shutdown-timeout 0` (vLLM's default) aborts in-flight requests | A workload that does not set a shutdown timeout gets immediate termination; draining tests must set one | Preserved semantics: the workload's value is applied to both the simulator and the supervisor. Not a gap |
