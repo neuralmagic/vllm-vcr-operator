@@ -103,6 +103,7 @@ Install details, required Secrets, image overrides, and RBAC are in
 | [`docs/spikes/runtime-layout.md`](docs/spikes/runtime-layout.md) | Runtime-layout spike record and evidence format |
 | [`docs/spikes/serving-behavior.md`](docs/spikes/serving-behavior.md) | Serving-behavior spike record and evidence format |
 | [`docs/limitations.md`](docs/limitations.md) | Out-of-scope items and known gaps, stated plainly |
+| [`docs/upstream-vllm-vcr.md`](docs/upstream-vllm-vcr.md) | The pinned `vllm-vcr` release, the facts encoded from it, and how to re-pin (`make check-upstream`) |
 | [`config/README.md`](config/README.md) | Manifests, install order, certificates, images, RBAC |
 | [`test/fixtures/README.md`](test/fixtures/README.md) | Integration fixtures and the llm-d end-to-end path |
 | [`test/spike/README.md`](test/spike/README.md) | How to run the spike harnesses and read their evidence |

@@ -46,6 +46,17 @@ vet:
 test:
 	$(GO) test ./...
 
+# check-upstream compares this operator against the pinned vllm-vcr release: the
+# upstream commit/tag, every `play` flag the translator emits, and the simulator's
+# default vLLM line (docs/upstream-vllm-vcr.md). It skips cleanly when the network
+# or the simulator checkout is unavailable, and exits non-zero on real drift.
+#
+# The checkout it reads defaults to $$VLLM_VCR_DIR, then /home/acardace/work/vllm-vcr;
+# set VLLM_VCR_DIR to point it elsewhere.
+.PHONY: check-upstream
+check-upstream:
+	./hack/check-vllm-vcr-upstream.sh $(if $(VLLM_VCR_DIR),--vllm-vcr-dir $(VLLM_VCR_DIR))
+
 .PHONY: test-unit
 test-unit:
 	$(GO) test $$($(GO) list ./... | grep -v '/test/e2e' | grep -v '/test/spike')

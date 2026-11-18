@@ -441,6 +441,9 @@ discovery continue to use `/v1/models`.
 The simulator container runs `vllm-vcr play` with real CLI flags. The `MOCK_*`
 variables found in the example manifests are invented by that image's
 `entrypoint.sh`; the operator replaces the entrypoint, so they are not used here.
+Every flag below is verified against the pinned simulator release by
+[`hack/check-vllm-vcr-upstream.sh`](../hack/check-vllm-vcr-upstream.sh); the pin and
+the encoded facts are in [`docs/upstream-vllm-vcr.md`](upstream-vllm-vcr.md).
 
 | `play` flag | Source |
 | --- | --- |
@@ -457,9 +460,9 @@ variables found in the example manifests are invented by that image's
 | `--seed` | the workload's `--seed` (vLLM default `0`) |
 | `--latency-trace` | `<profile dir>/<trace.file>` |
 | `--replay-tokens`, `--replay-match prefix` | only when the profile grants `capabilities.contentReplay` |
-| `--expect-config-hash` | the profile's `vllm.configHash`, when recorded |
+| `--expect-config-hash` | the profile's `vllm.configHash`, when recorded, with the schema's optional `sha256:` tag removed: the simulator stamps a bare lowercase-hex SHA-256 and compares it verbatim |
 | `--enable-kv-cache-events`, `--kv-events-endpoint`, `--kv-events-topic` | KV live events (below) |
-| `--control-address` | `tcp://0.0.0.0:<control port>`; JSON control API, not a metrics endpoint |
+| `--control-address` | `0.0.0.0:<control port>`, a plain `HOST:PORT` socket address (not a ZMQ endpoint: the simulator binds it with `TcpListener::bind`); JSON control API, not a metrics endpoint |
 | `--engine-id` | the Pod identity, when the caller supplies one |
 | `--log-requests` | the workload's `--enable-log-requests` |
 | `--max-loras` | the workload's `--max-loras`, when the profile grants `lora` |

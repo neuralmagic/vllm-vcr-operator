@@ -26,13 +26,16 @@ func TestBackendArgumentsAreSimulatorFlags(t *testing.T) {
 		"--kv-cache-size", "2048",
 		"--shutdown-timeout", "0",
 		"--seed", "0",
-		"--control-address", "tcp://0.0.0.0:8001",
+		"--control-address", "0.0.0.0:8001",
 		"--max-num-seqs", "128",
 		"--max-num-batched-tokens", "8192",
 		"--long-prefill-token-threshold", "4096",
 		"--scheduling-policy", "fcfs",
 		"--latency-trace", "/var/run/vcr/profile/trace.jsonl.gz",
-		"--expect-config-hash", "sha256:def456",
+		// The trace header carries a bare lowercase-hex hash and the simulator
+		// compares it verbatim (upstream src/lib.rs:626-631), so the profile
+		// schema's optional "sha256:" tag is removed.
+		"--expect-config-hash", "def456",
 	}
 	if got := admission.Backend.Command; !reflect.DeepEqual(got, want) {
 		t.Fatalf("backend command =\n %v\nwant\n %v", got, want)

@@ -201,8 +201,11 @@ func TestBackendCommandConnectsAndServesTheProfile(t *testing.T) {
 	if !containsPair(command, "--max-num-batched-tokens", "8192") {
 		t.Errorf("simulator per-step budget does not come from the profile's coverage:\n%v", command)
 	}
-	if !containsPair(command, "--control-address", "tcp://0.0.0.0:8001") {
-		t.Errorf("simulator control API is not on the documented port:\n%v", command)
+	// A plain HOST:PORT socket address: the simulator binds it with
+	// TcpListener::bind, which rejects a ZMQ-style "tcp://" scheme
+	// (upstream docs/control-api.md:3).
+	if !containsPair(command, "--control-address", "0.0.0.0:8001") {
+		t.Errorf("simulator control API is not on the documented HOST:PORT address:\n%v", command)
 	}
 	if slices.Contains(command, "--enable-kv-cache-events") {
 		t.Errorf("simulator publishes KV events although the run did not ask for them:\n%v", command)

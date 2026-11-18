@@ -40,7 +40,7 @@ obvious.
 | `POST /tokenize` | preserved, unverified | Frontend feature; the serving spike uses it to cross-check reported `prompt_tokens` |
 | `GET /metrics` (Prometheus) | preserved, unverified | Frontend only. Series names in `capabilities.metrics` |
 | `/health`, `/readyz`, `/healthz` | preserved, unverified | Frontend `/health`; supervisor `/healthz` and `/readyz` on `127.0.0.1:8082` |
-| Simulator control API (`/config`, `/stats`, `/stats/reset`, `/log` on `8001`) | translated, unverified | JSON, **not** Prometheus: used only as a readiness input and for diagnostics |
+| Simulator control API (`/config`, `/stats`, `/stats/reset`, `/log` on `8001`, bound from `--control-address HOST:PORT`) | translated, unverified | JSON, **not** Prometheus: used only as a readiness input and for diagnostics |
 | Engine-core ZMQ handshake on `29550` | preserved, unverified | The frontend binds it; the simulator connects. `docs/contracts/runtime-layout.md` |
 
 ## Generation and rendering
@@ -135,6 +135,7 @@ asserted by unit and envtest tests that need no container images:
 | The device plugin advertises the synthetic resource and registers with kubelet | `go test ./internal/deviceplugin/...` |
 | Fixtures request the synthetic resource, keep llm-d labels, and carry no simulator opt-in | `go test ./test/fixtures/...` |
 | Admission, provenance annotations, and rejection in a cluster-shaped API server | `make test-e2e` |
+| Every emitted `vllm-vcr play` flag, the pin, and the target vLLM line match the pinned simulator release | `make check-upstream` (skips cleanly offline) and `go test ./hack/...` |
 
 ## How a capability moves
 
