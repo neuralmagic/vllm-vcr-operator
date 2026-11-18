@@ -186,11 +186,11 @@ func TestResolveReportsIndependentRejections(t *testing.T) {
 	if len(rs) < 2 {
 		t.Fatalf("got %d rejections, want at least 2 independent problems: %v", len(rs), rs)
 	}
-	found := map[vllm.Setting]bool{}
+	found := map[string]bool{}
 	for _, r := range rs {
 		found[r.Setting] = true
 	}
-	if !found[vllm.SettingTensorParallelSize] || !found[vllm.SettingGPUMemUtilization] {
+	if !found[string(vllm.SettingTensorParallelSize)] || !found[string(vllm.SettingGPUMemUtilization)] {
 		t.Fatalf("rejections %v do not name both offending settings", rs)
 	}
 }

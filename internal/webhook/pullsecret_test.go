@@ -178,8 +178,10 @@ func TestProfilePullSecretOverridesEnvironmentSecrets(t *testing.T) {
 func TestLegacyDockercfgSecretIsProjected(t *testing.T) {
 	legacy := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: workloadPullSecret, Namespace: operatorNamespace},
+		// The entry names the selected profile image's registry: an entry for
+		// another registry cannot authenticate that pull and is not projected.
 		Data: map[string][]byte{corev1.DockerConfigKey: []byte(
-			`{"registry.example.com":{"username":"legacy","password":"legacy-value"}}`)},
+			`{"quay.io":{"username":"legacy","password":"legacy-value"}}`)},
 	}
 	c := testClient(t, environmentWithPullSecret(t, workloadPullSecret), legacy)
 	mutator := testMutator(t, c)
@@ -204,7 +206,7 @@ func TestLegacyDockercfgSecretIsProjected(t *testing.T) {
 	if err := json.Unmarshal(projected.Data[corev1.DockerConfigJsonKey], &payload); err != nil {
 		t.Fatalf("projected payload is not a docker config document: %v", err)
 	}
-	if _, ok := payload.Auths["registry.example.com"]; !ok {
+	if _, ok := payload.Auths["quay.io"]; !ok {
 		t.Errorf("projected payload does not carry the legacy registry entry: %v", payload.Auths)
 	}
 }
@@ -523,5 +525,149 @@ func TestForeignSecretWithTheProjectedNameIsNotOverwritten(t *testing.T) {
 	}
 	if string(after.Data["key"]) != "value" {
 		t.Errorf("foreign Secret data was modified")
+	}
+}
+
+// TestUnrelatedRegistrySecretIsNotProjected asserts the environment-wide list is a
+// candidate list: a Secret whose docker config carries no credential for the
+// selected image's registry is not copied into the workload namespace.
+func TestUnrelatedRegistrySecretIsNotProjected(t *testing.T) {
+	const unrelated = "unrelated-registry"
+	const unrelatedPassword = "unrelated-s3cret-value"
+	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{
+			{Name: workloadPullSecret}, {Name: unrelated},
+		}
+	})
+	c := testClient(t, env,
+		dockerConfigSecret(workloadPullSecret, map[string]map[string]string{
+			"quay.io": {"username": "profile-puller", "password": workloadPassword},
+		}),
+		dockerConfigSecret(unrelated, map[string]map[string]string{
+			"ghcr.io": {"username": "other", "password": unrelatedPassword},
+		}),
+	)
+	pod := testPod()
+
+	resp := testMutator(t, c).Admit(t.Context(), admissionRequest(t, admissionv1.Create, pod))
+	if !resp.Allowed {
+		t.Fatalf("GPU Pod denied: %s", messageOf(resp))
+	}
+	projected := &corev1.Secret{}
+	key := types.NamespacedName{Namespace: workloadNamespace, Name: projectedPullSecretName(t, applyPatch(t, pod, resp.Patch))}
+	if err := c.Get(t.Context(), key, projected); err != nil {
+		t.Fatalf("projected Secret %s: %v", key, err)
+	}
+	payload := string(projected.Data[corev1.DockerConfigJsonKey])
+	if strings.Contains(payload, unrelatedPassword) || strings.Contains(payload, "ghcr.io") {
+		t.Errorf("projected payload carries a credential for a registry the profile image does not use: %s", payload)
+	}
+	if !strings.Contains(payload, workloadPassword) {
+		t.Errorf("projected payload does not carry the matching registry credential: %s", payload)
+	}
+}
+
+// TestOnlyMatchingRegistryEntriesAreProjected asserts a single Secret that carries
+// credentials for several registries contributes only the entry that applies to the
+// selected image.
+func TestOnlyMatchingRegistryEntriesAreProjected(t *testing.T) {
+	const unrelatedPassword = "unrelated-s3cret-value"
+	source := dockerConfigSecret(workloadPullSecret, map[string]map[string]string{
+		"quay.io": {"username": "profile-puller", "password": workloadPassword},
+		"ghcr.io": {"username": "other", "password": unrelatedPassword},
+	})
+	c := testClient(t, environmentWithPullSecret(t, workloadPullSecret), source)
+	pod := testPod()
+
+	resp := testMutator(t, c).Admit(t.Context(), admissionRequest(t, admissionv1.Create, pod))
+	if !resp.Allowed {
+		t.Fatalf("GPU Pod denied: %s", messageOf(resp))
+	}
+	projected := &corev1.Secret{}
+	key := types.NamespacedName{Namespace: workloadNamespace, Name: projectedPullSecretName(t, applyPatch(t, pod, resp.Patch))}
+	if err := c.Get(t.Context(), key, projected); err != nil {
+		t.Fatalf("projected Secret %s: %v", key, err)
+	}
+	payload := string(projected.Data[corev1.DockerConfigJsonKey])
+	if strings.Contains(payload, unrelatedPassword) {
+		t.Errorf("projected payload carries an entry for another registry: %s", payload)
+	}
+	if !strings.Contains(payload, workloadPassword) {
+		t.Errorf("projected payload does not carry the matching registry credential: %s", payload)
+	}
+}
+
+// TestNoMatchingRegistryProjectsNothing asserts that when no configured Secret can
+// authenticate the profile image's registry, admission lets the pull proceed
+// anonymously instead of copying unrelated credentials.
+func TestNoMatchingRegistryProjectsNothing(t *testing.T) {
+	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{{Name: workloadPullSecret}}
+	})
+	c := testClient(t, env, dockerConfigSecret(workloadPullSecret, map[string]map[string]string{
+		"ghcr.io": {"username": "other", "password": "other-value"},
+	}))
+	pod := testPod()
+
+	resp := testMutator(t, c).Admit(t.Context(), admissionRequest(t, admissionv1.Create, pod))
+	if !resp.Allowed {
+		t.Fatalf("GPU Pod denied: %s", messageOf(resp))
+	}
+	mutated := applyPatch(t, pod, resp.Patch)
+	if len(mutated.Spec.ImagePullSecrets) != 1 || mutated.Spec.ImagePullSecrets[0].Name != "workload-owned-pull" {
+		t.Errorf("imagePullSecrets = %v, want only the workload's own secret", mutated.Spec.ImagePullSecrets)
+	}
+	secrets := &corev1.SecretList{}
+	if err := c.List(t.Context(), secrets); err != nil {
+		t.Fatalf("list Secrets: %v", err)
+	}
+	for _, secret := range secrets.Items {
+		if strings.HasPrefix(secret.Name, names.PullSecretPrefix) {
+			t.Errorf("a projected Secret %s was created although no credential covers the profile image's registry", secret.Name)
+		}
+	}
+}
+
+// TestProjectedNameFollowsTheProjectedCredentials asserts the copy is named after the
+// sources that actually contributed a credential for the selected image, not after
+// every configured candidate. Otherwise two profiles served from different registries
+// would share one copy, and whichever Pod was admitted last would decide the
+// credential both of them reference.
+func TestProjectedNameFollowsTheProjectedCredentials(t *testing.T) {
+	const secondSecret = "second-registry"
+	const secondImage = "ghcr.io/example/profiles:qwen3-0.6b-h200-tp1-bf16"
+
+	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{
+			{Name: workloadPullSecret}, {Name: secondSecret},
+		}
+	})
+	sources := []client.Object{
+		dockerConfigSecret(workloadPullSecret, map[string]map[string]string{
+			"quay.io": {"username": "quay", "password": "quay-value"},
+		}),
+		dockerConfigSecret(secondSecret, map[string]map[string]string{
+			"ghcr.io": {"username": "ghcr", "password": "ghcr-value"},
+		}),
+	}
+	pod := testPod()
+
+	admit := func(profileImage string) string {
+		env := env.DeepCopy()
+		env.Spec.Profiles[0].Image = profileImage
+		env.Status.Profiles[0].Image = profileImage
+		objects := append([]client.Object{env}, sources...)
+		c := testClient(t, objects...)
+		resp := testMutator(t, c).Admit(t.Context(), admissionRequest(t, admissionv1.Create, pod))
+		if !resp.Allowed {
+			t.Fatalf("admission denied for %s: %s", profileImage, messageOf(resp))
+		}
+		return projectedPullSecretName(t, applyPatch(t, pod, resp.Patch))
+	}
+
+	quayCopy := admit(testImage)
+	ghcrCopy := admit(secondImage)
+	if quayCopy == ghcrCopy {
+		t.Errorf("both profiles reference one projected Secret %q although they are served from different registries", quayCopy)
 	}
 }

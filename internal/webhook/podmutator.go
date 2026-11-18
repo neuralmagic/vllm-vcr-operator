@@ -13,20 +13,17 @@ import (
 	jsonpatch "gomodules.xyz/jsonpatch/v2"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/opendatahub-io/vllm-vcr-operator/internal/rejection"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/runtime"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/translator"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/vllm"
 )
-
-// syntheticDeviceName is the extended resource that makes a Pod applicable.
-const syntheticDeviceName = names.SyntheticResourceName
 
 // PodMutator translates GPU-requesting vLLM workloads into the simulated runtime
 // layout (docs/contracts/admission.md).
@@ -98,10 +95,10 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 		pod.Namespace = req.Namespace
 	}
 
-	if !requestsSyntheticDevice(pod) {
+	if !runtime.RequestsSyntheticDevice(pod) {
 		return allowed()
 	}
-	if alreadyInjected(pod) {
+	if runtime.AlreadyInjected(pod) {
 		return allowed()
 	}
 
@@ -127,7 +124,7 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 		Volumes:   volumeMap(pod),
 	})
 	if err != nil {
-		if denial := resolutionDenial(err); denial != nil {
+		if denial := rejectionDenial(err); denial != nil {
 			return denial.response()
 		}
 		// internal/vllm reports everything it can establish safely; anything else
@@ -143,7 +140,14 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 		PodIdentity: pod.Name,
 	})
 	if err != nil {
-		return translationDenial(err).response()
+		// The settings policy produces the same structured rejection as the
+		// resolver, so both stages are reported by one function; anything else is
+		// an operator-side failure.
+		denial := rejectionDenial(err)
+		if denial == nil {
+			denial = operatorFailure("%v", err)
+		}
+		return denial.response()
 	}
 
 	mutated, err := runtime.Mutate(pod, admitted)
@@ -155,7 +159,7 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 	// request may cause it. The projected name is derived from the payload, so a
 	// dry-run request produces the same patch without creating anything.
 	dryRun := req.DryRun != nil && *req.DryRun
-	projected, err := m.projectPullSecrets(ctx, pod, admitted.PullSecrets, dryRun)
+	projected, err := m.projectPullSecrets(ctx, pod, admitted, dryRun)
 	if err != nil {
 		denial := operatorFailure("%v", err)
 		m.recordOperatorProblem(env, log, denial.detail)
@@ -179,29 +183,21 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 	return response
 }
 
-// resolutionDenial renders internal/vllm rejections as a workload denial.
-func resolutionDenial(err error) *admissionDenial {
-	rejections, ok := vllm.Rejected(err)
+// rejectionDenial renders a structured rejection as a workload denial, or nil when
+// err carries no rejection.
+//
+// internal/vllm and internal/translator produce the same rejection type
+// (internal/rejection), so one function reports either stage: a workload must see
+// the setting and the reason whichever decision refused it, and the webhook must not
+// grow a second parser for a second type.
+func rejectionDenial(err error) *admissionDenial {
+	rejections, ok := rejection.Rejected(err)
 	if !ok {
 		return nil
 	}
 	described := make([]string, len(rejections))
-	for i, rejection := range rejections {
-		described[i] = describeSetting(string(rejection.Setting), rejection.Value, rejection.Reason)
-	}
-	return workloadFailure("%s", strings.Join(described, "; "))
-}
-
-// translationDenial renders internal/translator rejections as a workload denial
-// and everything else as an operator problem.
-func translationDenial(err error) *admissionDenial {
-	rejections, ok := translator.Rejected(err)
-	if !ok {
-		return operatorFailure("%v", err)
-	}
-	described := make([]string, len(rejections))
-	for i, rejection := range rejections {
-		described[i] = describeSetting(rejection.Setting, "", rejection.Reason)
+	for i, r := range rejections {
+		described[i] = describeSetting(r.Setting, r.Value, r.Reason)
 	}
 	return workloadFailure("%s", strings.Join(described, "; "))
 }
@@ -222,55 +218,6 @@ func trimErrorPrefix(err error, prefix string) string {
 	return strings.TrimPrefix(err.Error(), prefix+": ")
 }
 
-// requestsSyntheticDevice reports whether any container or init container
-// requests or limits the synthetic device.
-func requestsSyntheticDevice(pod *corev1.Pod) bool {
-	for i := range pod.Spec.Containers {
-		if _, ok := syntheticDeviceQuantity(pod.Spec.Containers[i].Resources); ok {
-			return true
-		}
-	}
-	for i := range pod.Spec.InitContainers {
-		if _, ok := syntheticDeviceQuantity(pod.Spec.InitContainers[i].Resources); ok {
-			return true
-		}
-	}
-	return false
-}
-
-// syntheticDeviceQuantity returns the container's synthetic device allocation.
-func syntheticDeviceQuantity(resources corev1.ResourceRequirements) (resource.Quantity, bool) {
-	name := corev1.ResourceName(syntheticDeviceName)
-	if quantity, ok := resources.Requests[name]; ok {
-		return quantity, true
-	}
-	if quantity, ok := resources.Limits[name]; ok {
-		return quantity, true
-	}
-	return resource.Quantity{}, false
-}
-
-// alreadyInjected reports whether this operator already applied the runtime
-// layout. The annotation alone is not enough: the injected containers identify a
-// complete layout, exactly as internal/runtime decides it.
-func alreadyInjected(pod *corev1.Pod) bool {
-	if pod.Annotations[names.InjectedAnnotation] == "" {
-		return false
-	}
-	return hasContainer(pod.Spec.Containers, names.BackendContainerName) &&
-		hasContainer(pod.Spec.InitContainers, names.ProvisionerContainerName)
-}
-
-// hasContainer reports whether the named container is present.
-func hasContainer(containers []corev1.Container, name string) bool {
-	for _, container := range containers {
-		if container.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
 // workloadContainer returns the container whose vLLM invocation is resolved and
 // whose device allocation is preserved.
 //
@@ -278,40 +225,35 @@ func hasContainer(containers []corev1.Container, name string) bool {
 // consumers cannot be translated without deciding which one the allocation
 // belongs to, so the Pod as a whole is rejected rather than translated partially.
 func workloadContainer(pod *corev1.Pod) (*corev1.Container, int32, *admissionDenial) {
-	var owners []string
-	index := -1
-	for i := range pod.Spec.Containers {
-		if _, ok := syntheticDeviceQuantity(pod.Spec.Containers[i].Resources); !ok {
-			continue
-		}
-		owners = append(owners, pod.Spec.Containers[i].Name)
-		if index < 0 {
-			index = i
-		}
+	owners := runtime.SyntheticDeviceOwners(pod.Spec.Containers)
+	var ownerNames []string
+	for _, index := range owners {
+		ownerNames = append(ownerNames, pod.Spec.Containers[index].Name)
 	}
 
 	switch {
 	case len(owners) > 1:
 		return nil, 0, workloadFailure(
 			"containers %s all request %s: exactly one workload container may own the synthetic allocation",
-			strings.Join(owners, ", "), syntheticDeviceName)
-	case index < 0:
+			strings.Join(ownerNames, ", "), names.SyntheticResourceName)
+	case len(owners) == 0:
 		return nil, 0, workloadFailure(
 			"only an init container requests %s: the Pod has no workload container whose entrypoint can be translated",
-			syntheticDeviceName)
+			names.SyntheticResourceName)
 	}
+	index := owners[0]
 
-	quantity, _ := syntheticDeviceQuantity(pod.Spec.Containers[index].Resources)
+	quantity, _ := runtime.SyntheticDeviceQuantity(pod.Spec.Containers[index].Resources)
 	if quantity.MilliValue()%1000 != 0 {
 		return nil, 0, workloadFailure(
 			"the %s allocation %s is not a whole number of devices",
-			syntheticDeviceName, quantity.String())
+			names.SyntheticResourceName, quantity.String())
 	}
 	devices := quantity.Value()
 	if devices > math.MaxInt32 {
 		return nil, 0, workloadFailure(
 			"the %s allocation %s exceeds the supported maximum of %d devices",
-			syntheticDeviceName, quantity.String(), math.MaxInt32)
+			names.SyntheticResourceName, quantity.String(), math.MaxInt32)
 	}
 	// A zero or negative allocation is left to internal/translator, which reports
 	// it against the resource name with the policy's own wording.

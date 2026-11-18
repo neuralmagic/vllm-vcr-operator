@@ -84,18 +84,18 @@ func TestProfileReconciliationPublishesTheCatalog(t *testing.T) {
 		t.Error("status.profiles[0].reconciledAt is zero: admission would not know when the digest was verified")
 	}
 
-	ready := condition(env, controller.ConditionReady)
+	ready := condition(env, vcrv1alpha1.ConditionReady)
 	if ready == nil || ready.Status != metav1.ConditionTrue {
 		t.Fatalf("Ready condition = %+v, want True", ready)
 	}
-	if ready.Reason != controller.ReasonEnvironmentReady {
-		t.Errorf("Ready reason = %q, want %q", ready.Reason, controller.ReasonEnvironmentReady)
+	if ready.Reason != vcrv1alpha1.ReasonEnvironmentReady {
+		t.Errorf("Ready reason = %q, want %q", ready.Reason, vcrv1alpha1.ReasonEnvironmentReady)
 	}
-	profiles := condition(env, controller.ConditionProfilesReconciled)
+	profiles := condition(env, vcrv1alpha1.ConditionProfilesReconciled)
 	if profiles == nil || profiles.Status != metav1.ConditionTrue {
 		t.Fatalf("ProfilesReconciled condition = %+v, want True", profiles)
 	}
-	plugin := condition(env, controller.ConditionDevicePluginReady)
+	plugin := condition(env, vcrv1alpha1.ConditionDevicePluginReady)
 	if plugin == nil || plugin.Status != metav1.ConditionTrue {
 		t.Fatalf("DevicePluginReady condition = %+v, want True", plugin)
 	}
@@ -196,21 +196,21 @@ func TestUnusableProfileIsReportedWithoutErasingGoodOnes(t *testing.T) {
 		}
 	}
 
-	profiles := condition(env, controller.ConditionProfilesReconciled)
+	profiles := condition(env, vcrv1alpha1.ConditionProfilesReconciled)
 	if profiles == nil || profiles.Status != metav1.ConditionFalse {
 		t.Fatalf("ProfilesReconciled condition = %+v, want False", profiles)
 	}
-	if profiles.Reason != controller.ReasonProfileUnusable {
-		t.Errorf("ProfilesReconciled reason = %q, want %q", profiles.Reason, controller.ReasonProfileUnusable)
+	if profiles.Reason != vcrv1alpha1.ReasonProfileUnusable {
+		t.Errorf("ProfilesReconciled reason = %q, want %q", profiles.Reason, vcrv1alpha1.ReasonProfileUnusable)
 	}
 	if !strings.Contains(profiles.Message, unusableProfileImage) {
 		t.Errorf("ProfilesReconciled message %q does not name the offending image", profiles.Message)
 	}
-	ready := condition(env, controller.ConditionReady)
+	ready := condition(env, vcrv1alpha1.ConditionReady)
 	if ready == nil || ready.Status != metav1.ConditionFalse {
 		t.Fatalf("Ready condition = %+v, want False", ready)
 	}
-	if ready.Reason != controller.ReasonProfilesNotReconciled {
-		t.Errorf("Ready reason = %q, want %q", ready.Reason, controller.ReasonProfilesNotReconciled)
+	if ready.Reason != vcrv1alpha1.ReasonProfilesNotReconciled {
+		t.Errorf("Ready reason = %q, want %q", ready.Reason, vcrv1alpha1.ReasonProfilesNotReconciled)
 	}
 }

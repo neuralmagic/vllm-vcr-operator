@@ -345,9 +345,10 @@ var policy = []Rule{
 	// table has no row for it. See docs/settings-policy.md.
 	// GPU memory utilization, KV-memory allocation, cache-block overrides.
 	{Setting: vllm.SettingGPUMemUtilization, Family: familyMemory, Disposition: DispositionRequireProfile,
-		Reason: "a memory fraction is accepted only when the profile declares coverage.kvMemoryConversion: cache capacity is never inferred from a percentage alone"},
-	{Setting: vllm.SettingKVCacheMemoryBytes, Family: familyMemory, Disposition: DispositionRequireProfile,
-		Reason: "an explicit KV-cache byte budget is accepted only when the profile declares coverage.kvMemoryConversion, which carries the validated conversion to simulated capacity"},
+		Reason:  "a memory fraction is accepted only when the profile declares coverage.kvMemoryConversion: cache capacity is never inferred from a percentage alone",
+		Warning: "simulated KV capacity is the profile's recorded cache.kvBlocks, not a function of the requested memory fraction"},
+	{Setting: vllm.SettingKVCacheMemoryBytes, Family: familyMemory, Disposition: DispositionReject,
+		Reason: "this release has no validated bytes-to-blocks conversion, so an explicit KV-cache byte budget cannot be applied; the selected profile records its simulated capacity as cache.kvBlocks"},
 	{Setting: vllm.SettingNumGPUBlocks, Family: familyMemory, Disposition: DispositionTranslate,
 		Reason: "translated to the simulator's --kv-cache-size within the profile's coverage.kvBlocks"},
 	{Setting: vllm.SettingCPUOffloadGB, Family: familyMemory, Disposition: DispositionReject,

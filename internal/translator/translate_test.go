@@ -138,7 +138,18 @@ func TestSettingsPolicyFamilies(t *testing.T) {
 		{name: "memory fraction without a conversion is rejected", args: []string{"--gpu-memory-utilization", "0.9"},
 			wantSetting: "profile coverage", wantReason: "kvMemoryConversion"},
 		{name: "memory fraction with a conversion is accepted", args: []string{"--gpu-memory-utilization", "0.9"},
-			mutate: allowKVMemoryConversion},
+			mutate: allowKVMemoryConversion,
+			check: func(t *testing.T, a *plan.Admission) {
+				// The fraction authorizes the setting but never becomes the simulated
+				// capacity: the plan must say the recorded kvBlocks stand.
+				if !warningsContain(a, "cache.kvBlocks") {
+					t.Errorf("warnings %v do not state that simulated capacity is the recorded cache.kvBlocks", a.Warnings)
+				}
+				requireArgs(t, "backend", a.Backend.Command, "--kv-cache-size", "2048")
+			}},
+		{name: "kv-cache byte budget is rejected: no validated conversion", args: []string{"--kv-cache-memory-bytes", "1073741824"},
+			mutate:      allowKVMemoryConversion,
+			wantSetting: "--kv-cache-memory-bytes", wantReason: "blocks"},
 		{name: "cpu offload is rejected", args: []string{"--cpu-offload-gb", "4"},
 			wantSetting: "--cpu-offload-gb", wantReason: "offload"},
 
@@ -146,13 +157,22 @@ func TestSettingsPolicyFamilies(t *testing.T) {
 		{name: "lower maximum model length is translated", args: []string{"--max-model-len", "16384"},
 			check: func(t *testing.T, a *plan.Admission) {
 				requireArgs(t, "backend", a.Backend.Command, "--max-model-len", "16384")
+				// The frontend must enforce the same cap: leaving it unset would let
+				// the frontend advertise and accept prompts beyond recorded coverage.
+				requireArgs(t, "frontend", a.Frontend.Args, "--max-model-len", "16384")
 			}},
 		{name: "auto maximum model length resolves to the coverage bound", args: []string{"--max-model-len", "-1"},
 			check: func(t *testing.T, a *plan.Admission) {
 				requireArgs(t, "backend", a.Backend.Command, "--max-model-len", "131072")
+				requireArgs(t, "frontend", a.Frontend.Args, "--max-model-len", "131072")
 				if !warningsContain(a, "model maximum") {
 					t.Errorf("warnings %v do not explain the resolved bound", a.Warnings)
 				}
+			}},
+		{name: "unset maximum model length is enforced by both processes",
+			check: func(t *testing.T, a *plan.Admission) {
+				requireArgs(t, "backend", a.Backend.Command, "--max-model-len", "131072")
+				requireArgs(t, "frontend", a.Frontend.Args, "--max-model-len", "131072")
 			}},
 		{name: "maximum model length above coverage is rejected", args: []string{"--max-model-len", "262144"},
 			wantSetting: "profile coverage", wantReason: "maxModelLen"},
@@ -211,17 +231,16 @@ func TestSettingsPolicyFamilies(t *testing.T) {
 			args:        []string{"--kv-events-config", `{"enable_kv_cache_events":true}`},
 			mutate:      noKVEvents,
 			wantSetting: "--kv-events-config", wantReason: "kvEvents"},
-		{name: "kv event replay without the capability is rejected",
+		{name: "kv event replay is rejected for the pinned simulator",
 			args:        []string{"--kv-events-config", `{"enable_kv_cache_events":true,"replay_endpoint":"tcp://router:5557"}`},
-			wantSetting: "--kv-events-config", wantReason: "kvEventReplay"},
-		{name: "kv event replay with the capability is accepted",
-			args:   []string{"--kv-events-config", `{"enable_kv_cache_events":true,"replay_endpoint":"tcp://router:5557"}`},
-			mutate: allowKVReplay,
-			check: func(t *testing.T, a *plan.Admission) {
-				if !warningsContain(a, "replay") {
-					t.Errorf("warnings %v do not explain the replay limitation", a.Warnings)
-				}
-			}},
+			wantSetting: "--kv-events-config", wantReason: names.SupportedSimulatorTag},
+		{name: "kv event replay is rejected even when the profile claims the capability",
+			args:        []string{"--kv-events-config", `{"enable_kv_cache_events":true,"replay_endpoint":"tcp://router:5557"}`},
+			mutate:      allowKVReplay,
+			wantSetting: "--kv-events-config", wantReason: names.SupportedSimulatorTag},
+		{name: "kv event replay is rejected when events are disabled too",
+			args:        []string{"--kv-events-config", `{"enable_kv_cache_events":false,"replay_endpoint":"tcp://router:5557"}`},
+			wantSetting: "--kv-events-config", wantReason: "replay endpoint"},
 		{name: "kv event publisher high-water mark is rejected",
 			args:        []string{"--kv-events-config", `{"enable_kv_cache_events":true,"hwm":1000}`},
 			wantSetting: "--kv-events-config", wantReason: "hwm"},

@@ -49,9 +49,19 @@ type Admission struct {
 	// Placement is the accelerator-free placement applied to the Pod.
 	Placement Placement
 
-	// PullSecrets are the Secret names required to pull the images the Pod
-	// references. Values never appear here: only names.
+	// PullSecrets are the Secret names the selected profile image may need. When
+	// ProfilePullSecret is set, PullSecrets holds exactly that name; otherwise it
+	// is the environment-wide candidate list and only entries whose docker config
+	// covers the image's registry host are projected. Values never appear here:
+	// only names.
 	PullSecrets []string
+
+	// ProfilePullSecret is the profile's explicit spec.profiles[].pullSecretName.
+	// It is projected as configured, because the operator selected it for exactly
+	// this profile. Empty means the environment-wide candidates apply and are
+	// filtered by registry host, so unrelated registry credentials are never
+	// copied into a workload namespace.
+	ProfilePullSecret string
 
 	// Provenance is recorded as Pod annotations.
 	Provenance Provenance

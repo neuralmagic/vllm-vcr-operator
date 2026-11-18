@@ -66,6 +66,10 @@ func TestFrontendArgumentsRunUnderTheSupervisor(t *testing.T) {
 		"vllm", "serve", "Qwen/Qwen3-0.6B",
 		"--host", "0.0.0.0",
 		"--port", "8000",
+		// The maximum model length is enforced by the frontend as well as the
+		// simulator: the frontend would otherwise serve prompts the recording
+		// never covered.
+		"--max-model-len", "131072",
 		"--data-parallel-size", "1",
 		"--data-parallel-size-local", "0",
 		"--data-parallel-address", "127.0.0.1",
@@ -136,15 +140,23 @@ func TestPlanCarriesEverythingTheRuntimeNeeds(t *testing.T) {
 		t.Errorf("gpu devices = %d, want %d", got, want)
 	}
 
-	// The per-profile pull-secret override replaces the environment-wide list.
+	// The per-profile pull-secret override replaces the environment-wide list, and
+	// the plan says so explicitly so the webhook can project it as configured.
 	if got, want := admission.PullSecrets, []string{"private-profile-pull"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("pull secrets = %v, want %v", got, want)
 	}
-	// Without an override the environment-wide names are used.
+	if got, want := admission.ProfilePullSecret, "private-profile-pull"; got != want {
+		t.Errorf("profile pull secret = %q, want %q", got, want)
+	}
+	// Without an override the environment-wide names are candidates the webhook
+	// filters by registry host, so no profile-level override is reported.
 	admission, err = runTranslate(t, translateCase{name: "minimal"}, testEnvironment())
 	mustAccept(t, admission, err)
 	if got, want := admission.PullSecrets, []string{"profile-pull"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("pull secrets = %v, want %v", got, want)
+	}
+	if got := admission.ProfilePullSecret; got != "" {
+		t.Errorf("profile pull secret = %q, want none for an environment-wide candidate list", got)
 	}
 
 	if got, want := admission.Resources.Frontend.Requests.Cpu().String(), "2"; got != want {

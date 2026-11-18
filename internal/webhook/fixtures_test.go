@@ -15,7 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/controller"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/profile"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/webhook"
@@ -141,9 +140,9 @@ func testEnvironment(t *testing.T, mutate ...func(*vcrv1alpha1.SimulationEnviron
 			SupportedVLLMVersion: names.SupportedVLLMVersion,
 			Profiles:             []vcrv1alpha1.ResolvedProfile{resolvedProfile(t, testMetadata())},
 			Conditions: []metav1.Condition{{
-				Type:    controller.ConditionReady,
+				Type:    vcrv1alpha1.ConditionReady,
 				Status:  metav1.ConditionTrue,
-				Reason:  controller.ReasonEnvironmentReady,
+				Reason:  vcrv1alpha1.ReasonEnvironmentReady,
 				Message: "SimulationEnvironment is ready",
 			}},
 		},

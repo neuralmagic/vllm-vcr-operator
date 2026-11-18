@@ -44,15 +44,21 @@
 // The profile's images may need credentials. Admission copies the docker config
 // payload merged from the operator-namespace Secrets referenced by the selected
 // profile into an operator-managed Secret in the workload namespace, named
-// names.PullSecretPrefix plus a digest of the source Secret names, and references
-// that copy from the mutated Pod alongside the workload's own imagePullSecrets.
-// Naming the copy after its sources (not its content) means a credential rotation
-// rewrites one copy instead of accumulating copies every admitted Pod still points
-// at. The copy carries labels from internal/names and an applied-to/applied-at
-// annotation pair instead of an owner reference, because nothing namespace-local
-// owns it. An existing copy whose payload is unchanged is reused without a write.
-// The payload never appears in a response, annotation, event, error, or log line;
-// only Secret names and registry hosts do.
+// names.PullSecretPrefix plus a digest of the contributing Secret names, and
+// references that copy from the mutated Pod alongside the workload's own
+// imagePullSecrets. Only credentials that can apply are copied: a profile-level
+// spec.profiles[].pullSecretName is projected as configured, while an
+// environment-wide spec.imagePullSecrets entry contributes only when its docker
+// config covers the selected image's registry host. When no candidate does, nothing
+// is projected and the pull proceeds anonymously. Naming the copy after the
+// contributing sources (not its content) means a credential rotation rewrites one
+// copy instead of accumulating copies every admitted Pod still points at, and two
+// profiles served from different registries cannot share one copy. The copy carries
+// labels from internal/names and an applied-to/applied-at annotation pair instead of
+// an owner reference, because nothing namespace-local owns it. An existing copy whose
+// payload is unchanged is reused without a write. The payload never appears in a
+// response, annotation, event, error, or log line; only Secret names and registry
+// hosts do.
 //
 // Projection is the only side effect of admission and it is skipped for dry-run
 // requests. Sources are still read and merged on dry-run, so the decision matches a

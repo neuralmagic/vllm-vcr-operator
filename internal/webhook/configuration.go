@@ -13,7 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/controller"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/profile"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/translator"
@@ -62,12 +61,12 @@ func (m *PodMutator) environment(ctx context.Context) (*vcrv1alpha1.SimulationEn
 		return nil, operatorFailure("the SimulationEnvironment %q cannot be read: %v", key.Name, err)
 	}
 
-	ready := meta.FindStatusCondition(env.Status.Conditions, controller.ConditionReady)
+	ready := meta.FindStatusCondition(env.Status.Conditions, vcrv1alpha1.ConditionReady)
 	switch {
 	case ready == nil:
 		return nil, operatorFailure(
 			"the SimulationEnvironment %q publishes no %s condition: reconciliation has not completed",
-			env.Name, controller.ConditionReady)
+			env.Name, vcrv1alpha1.ConditionReady)
 	case ready.Status != metav1.ConditionTrue:
 		return nil, operatorFailure(
 			"the SimulationEnvironment %q is not ready (%s): %s",

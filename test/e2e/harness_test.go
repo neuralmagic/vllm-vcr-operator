@@ -540,14 +540,14 @@ func (h *harness) setDevicePluginReady(t *testing.T, nodes int32) {
 func (h *harness) requireReadyEnvironment(t *testing.T) *vcrv1alpha1.SimulationEnvironment {
 	t.Helper()
 	h.setDevicePluginReady(t, 1)
-	h.waitForCondition(t, controller.ConditionReady, metav1.ConditionTrue)
+	h.waitForCondition(t, vcrv1alpha1.ConditionReady, metav1.ConditionTrue)
 	h.poll(t, "the manager cache to observe a ready SimulationEnvironment", func() (bool, error) {
 		env := &vcrv1alpha1.SimulationEnvironment{}
 		key := types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}
 		if err := h.cachedClient.Get(helperContext(t), key, env); err != nil {
 			return false, err
 		}
-		ready := meta.FindStatusCondition(env.Status.Conditions, controller.ConditionReady)
+		ready := meta.FindStatusCondition(env.Status.Conditions, vcrv1alpha1.ConditionReady)
 		return ready != nil && ready.Status == metav1.ConditionTrue, nil
 	})
 	return h.getEnvironment(t)

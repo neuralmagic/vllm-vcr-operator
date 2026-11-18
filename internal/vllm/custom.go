@@ -14,7 +14,7 @@ import (
 // template cannot be rendered and the invocation is rejected.
 func resolveChatTemplate(p *parser, raw string) *Rejection {
 	if raw == "" {
-		return &Rejection{Setting: SettingChatTemplate, Value: raw, Reason: "empty chat template"}
+		return &Rejection{Setting: string(SettingChatTemplate), Value: raw, Reason: "empty chat template"}
 	}
 	if !looksLikeTemplatePath(raw) {
 		cfg := p.cfg
@@ -26,7 +26,7 @@ func resolveChatTemplate(p *parser, raw string) *Rejection {
 	}
 	containerPath, rej := p.resolvePath(raw)
 	if rej != nil {
-		rej.Setting = SettingChatTemplate
+		rej.Setting = string(SettingChatTemplate)
 		return rej
 	}
 	content, rej := p.files.read(containerPath, SettingChatTemplate)
@@ -62,7 +62,7 @@ func looksLikeTemplatePath(raw string) bool {
 // these keys".
 func resolveAPIKey(p *parser, raw string) *Rejection {
 	if raw == "" {
-		return &Rejection{Setting: SettingAPIKey, Value: RedactedValue, Reason: "empty API key"}
+		return &Rejection{Setting: string(SettingAPIKey), Value: RedactedValue, Reason: "empty API key"}
 	}
 	p.cfg.Auth.APIKeyRequired = true
 	p.cfg.Auth.APIKeySource = string(SettingAPIKey)
@@ -74,10 +74,10 @@ func resolveAPIKey(p *parser, raw string) *Rejection {
 func resolveMaxModelLen(p *parser, raw string) *Rejection {
 	v, err := humanReadableIntOrAuto(raw)
 	if err != nil {
-		return &Rejection{Setting: SettingMaxModelLen, Value: raw, Reason: "not an integer or \"auto\""}
+		return &Rejection{Setting: string(SettingMaxModelLen), Value: raw, Reason: "not an integer or \"auto\""}
 	}
 	if v < -1 || v == 0 {
-		return &Rejection{Setting: SettingMaxModelLen, Value: raw, Reason: "must be positive, or -1/\"auto\" to use the model maximum"}
+		return &Rejection{Setting: string(SettingMaxModelLen), Value: raw, Reason: "must be positive, or -1/\"auto\" to use the model maximum"}
 	}
 	p.cfg.Limits.MaxModelLen = &v
 	return nil
@@ -88,11 +88,11 @@ func resolveMaxModelLen(p *parser, raw string) *Rejection {
 func resolveKVEventsConfig(p *parser, raw string) *Rejection {
 	m, err := decodeJSONObject(raw)
 	if err != nil {
-		return &Rejection{Setting: SettingKVEventsConfig, Value: raw, Reason: err.Error()}
+		return &Rejection{Setting: string(SettingKVEventsConfig), Value: raw, Reason: err.Error()}
 	}
 	cfg := &KVEventsConfig{Raw: m}
 	fail := func(err error) *Rejection {
-		return &Rejection{Setting: SettingKVEventsConfig, Value: raw, Reason: err.Error()}
+		return &Rejection{Setting: string(SettingKVEventsConfig), Value: raw, Reason: err.Error()}
 	}
 	if cfg.Enable, err = m.jsonBool("enable_kv_cache_events"); err != nil {
 		return fail(err)
@@ -120,7 +120,7 @@ func resolveKVEventsConfig(p *parser, raw string) *Rejection {
 	}
 	if cfg.Publisher != nil && *cfg.Publisher != "zmq" && *cfg.Publisher != "null" {
 		return &Rejection{
-			Setting: SettingKVEventsConfig,
+			Setting: string(SettingKVEventsConfig),
 			Value:   *cfg.Publisher,
 			Reason:  `publisher must be "zmq" or "null"`,
 		}
@@ -134,11 +134,11 @@ func resolveKVEventsConfig(p *parser, raw string) *Rejection {
 func resolveKVTransferConfig(p *parser, raw string) *Rejection {
 	m, err := decodeJSONObject(raw)
 	if err != nil {
-		return &Rejection{Setting: SettingKVTransferConfig, Value: raw, Reason: err.Error()}
+		return &Rejection{Setting: string(SettingKVTransferConfig), Value: raw, Reason: err.Error()}
 	}
 	cfg := &KVTransferConfig{Raw: m}
 	fail := func(err error) *Rejection {
-		return &Rejection{Setting: SettingKVTransferConfig, Value: raw, Reason: err.Error()}
+		return &Rejection{Setting: string(SettingKVTransferConfig), Value: raw, Reason: err.Error()}
 	}
 	if cfg.Connector, err = m.jsonString("kv_connector"); err != nil {
 		return fail(err)
@@ -160,7 +160,7 @@ func resolveKVTransferConfig(p *parser, raw string) *Rejection {
 		case "kv_producer", "kv_consumer", "kv_both":
 		default:
 			return &Rejection{
-				Setting: SettingKVTransferConfig,
+				Setting: string(SettingKVTransferConfig),
 				Value:   *cfg.Role,
 				Reason:  `kv_role must be "kv_producer", "kv_consumer", or "kv_both"`,
 			}
@@ -174,11 +174,11 @@ func resolveKVTransferConfig(p *parser, raw string) *Rejection {
 func resolveSpeculativeConfig(p *parser, raw string) *Rejection {
 	m, err := decodeJSONObject(raw)
 	if err != nil {
-		return &Rejection{Setting: SettingSpeculativeConfig, Value: raw, Reason: err.Error()}
+		return &Rejection{Setting: string(SettingSpeculativeConfig), Value: raw, Reason: err.Error()}
 	}
 	cfg := &SpeculativeConfig{Raw: m}
 	fail := func(err error) *Rejection {
-		return &Rejection{Setting: SettingSpeculativeConfig, Value: raw, Reason: err.Error()}
+		return &Rejection{Setting: string(SettingSpeculativeConfig), Value: raw, Reason: err.Error()}
 	}
 	if cfg.Method, err = m.jsonString("method"); err != nil {
 		return fail(err)
@@ -194,7 +194,7 @@ func resolveSpeculativeConfig(p *parser, raw string) *Rejection {
 	}
 	if cfg.NumSpeculativeTokens != nil && *cfg.NumSpeculativeTokens < 1 {
 		return &Rejection{
-			Setting: SettingSpeculativeConfig,
+			Setting: string(SettingSpeculativeConfig),
 			Value:   fmt.Sprint(*cfg.NumSpeculativeTokens),
 			Reason:  "num_speculative_tokens must be positive",
 		}
@@ -208,14 +208,14 @@ func resolveSpeculativeConfig(p *parser, raw string) *Rejection {
 func resolveLimitMMPerPrompt(p *parser, raw string) *Rejection {
 	m, err := decodeJSONObject(raw)
 	if err != nil {
-		return &Rejection{Setting: SettingLimitMMPerPrompt, Value: raw, Reason: err.Error()}
+		return &Rejection{Setting: string(SettingLimitMMPerPrompt), Value: raw, Reason: err.Error()}
 	}
 	limits := make(map[string]int, len(m))
 	for modality, value := range m {
 		number, ok := value.(float64)
 		if !ok || number != float64(int(number)) || number < 0 {
 			return &Rejection{
-				Setting: SettingLimitMMPerPrompt,
+				Setting: string(SettingLimitMMPerPrompt),
 				Value:   modality,
 				Reason:  "the per-modality limit must be a non-negative integer",
 			}
@@ -230,11 +230,11 @@ func resolveLimitMMPerPrompt(p *parser, raw string) *Rejection {
 func resolveStructuredOutputs(p *parser, raw string) *Rejection {
 	m, err := decodeJSONObject(raw)
 	if err != nil {
-		return &Rejection{Setting: SettingStructuredOutputs, Value: raw, Reason: err.Error()}
+		return &Rejection{Setting: string(SettingStructuredOutputs), Value: raw, Reason: err.Error()}
 	}
 	cfg := &StructuredOutputsConfig{Raw: m}
 	fail := func(err error) *Rejection {
-		return &Rejection{Setting: SettingStructuredOutputs, Value: raw, Reason: err.Error()}
+		return &Rejection{Setting: string(SettingStructuredOutputs), Value: raw, Reason: err.Error()}
 	}
 	if cfg.Backend, err = m.jsonString("backend"); err != nil {
 		return fail(err)

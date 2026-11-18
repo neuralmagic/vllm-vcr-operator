@@ -39,19 +39,19 @@ func (p profileReconciliation) condition() metav1.Condition {
 		// cannot be completed until the configured image changes.
 		return metav1.Condition{
 			Status:  metav1.ConditionFalse,
-			Reason:  ReasonProfileUnusable,
+			Reason:  vcrv1alpha1.ReasonProfileUnusable,
 			Message: joinReasons(p.unusable, p.unavailable),
 		}
 	case len(p.unavailable) > 0:
 		return metav1.Condition{
 			Status:  metav1.ConditionFalse,
-			Reason:  ReasonRegistryUnavailable,
+			Reason:  vcrv1alpha1.ReasonRegistryUnavailable,
 			Message: joinReasons(p.unavailable, nil),
 		}
 	case p.configured == 0:
 		return metav1.Condition{
 			Status: metav1.ConditionTrue,
-			Reason: ReasonAllProfilesUsable,
+			Reason: vcrv1alpha1.ReasonAllProfilesUsable,
 			// An empty catalog is not an error, but it makes every GPU workload
 			// unadmittable, so say so instead of claiming a vacuous success.
 			Message: "no profile images are configured: admission rejects GPU workloads until spec.profiles references a profile image",
@@ -59,7 +59,7 @@ func (p profileReconciliation) condition() metav1.Condition {
 	default:
 		return metav1.Condition{
 			Status:  metav1.ConditionTrue,
-			Reason:  ReasonAllProfilesUsable,
+			Reason:  vcrv1alpha1.ReasonAllProfilesUsable,
 			Message: fmt.Sprintf("%d profile image(s) reconciled: admission pins the published digests", len(p.published)),
 		}
 	}
@@ -205,14 +205,14 @@ func devicePluginCondition(state DevicePluginState, reconciler *DevicePluginReco
 	if state.Desired > 0 && state.Ready == state.Desired {
 		return metav1.Condition{
 			Status: metav1.ConditionTrue,
-			Reason: ReasonDaemonSetReady,
+			Reason: vcrv1alpha1.ReasonDaemonSetReady,
 			Message: fmt.Sprintf("device plugin DaemonSet %s is ready on %d of %d node(s)%s",
 				location, state.Ready, state.Desired, exclusion),
 		}
 	}
 	return metav1.Condition{
 		Status: metav1.ConditionFalse,
-		Reason: ReasonDaemonSetNotReady,
+		Reason: vcrv1alpha1.ReasonDaemonSetNotReady,
 		Message: fmt.Sprintf("device plugin DaemonSet %s is not ready: %d of %d node(s) ready%s",
 			location, state.Ready, state.Desired, exclusion),
 	}
@@ -221,25 +221,25 @@ func devicePluginCondition(state DevicePluginState, reconciler *DevicePluginReco
 // readyCondition summarises the other two conditions. The message is the failing
 // condition's message so the reason for unreadiness is never hidden.
 func readyCondition(status *vcrv1alpha1.SimulationEnvironmentStatus) metav1.Condition {
-	profiles := meta.FindStatusCondition(status.Conditions, ConditionProfilesReconciled)
+	profiles := meta.FindStatusCondition(status.Conditions, vcrv1alpha1.ConditionProfilesReconciled)
 	if profiles == nil || profiles.Status != metav1.ConditionTrue {
 		return metav1.Condition{
 			Status:  metav1.ConditionFalse,
-			Reason:  ReasonProfilesNotReconciled,
+			Reason:  vcrv1alpha1.ReasonProfilesNotReconciled,
 			Message: messageOf(profiles, "no ProfilesReconciled condition is published"),
 		}
 	}
-	devicePlugin := meta.FindStatusCondition(status.Conditions, ConditionDevicePluginReady)
+	devicePlugin := meta.FindStatusCondition(status.Conditions, vcrv1alpha1.ConditionDevicePluginReady)
 	if devicePlugin == nil || devicePlugin.Status != metav1.ConditionTrue {
 		return metav1.Condition{
 			Status:  metav1.ConditionFalse,
-			Reason:  ReasonDevicePluginNotReady,
+			Reason:  vcrv1alpha1.ReasonDevicePluginNotReady,
 			Message: messageOf(devicePlugin, "no DevicePluginReady condition is published"),
 		}
 	}
 	return metav1.Condition{
 		Status: metav1.ConditionTrue,
-		Reason: ReasonEnvironmentReady,
+		Reason: vcrv1alpha1.ReasonEnvironmentReady,
 		Message: fmt.Sprintf("SimulationEnvironment is ready: %d profile image(s) published; %s",
 			len(status.Profiles), devicePlugin.Message),
 	}

@@ -23,11 +23,11 @@ type configFileEntry struct {
 func decodeYAMLMapping(content []byte) ([]configFileEntry, *Rejection) {
 	var doc any
 	if err := yaml.Unmarshal(content, &doc); err != nil {
-		return nil, &Rejection{Setting: SettingConfigFile, Reason: "the configuration file is not valid YAML or JSON"}
+		return nil, &Rejection{Setting: string(SettingConfigFile), Reason: "the configuration file is not valid YAML or JSON"}
 	}
 	mapping, ok := doc.(map[string]any)
 	if !ok {
-		return nil, &Rejection{Setting: SettingConfigFile, Reason: "the configuration file is not a mapping of flag names to values"}
+		return nil, &Rejection{Setting: string(SettingConfigFile), Reason: "the configuration file is not a mapping of flag names to values"}
 	}
 	keys := make([]string, 0, len(mapping))
 	for key := range mapping {

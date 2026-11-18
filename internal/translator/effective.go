@@ -136,13 +136,9 @@ func resolveEffective(cfg *vllm.Config, metadata *profile.Metadata, req Request,
 		metadata.Coverage.MaxNumBatchedTokens, string(vllm.SettingMaxNumBatchedTokens), eff.warnings)
 
 	// Chunked prefill and the per-step budget interact: without chunking, one
-	// prompt must fit in a single step.
-	if !eff.chunkedPrefill && eff.maxNumBatchedTokens > 0 && eff.maxModelLen > eff.maxNumBatchedTokens {
-		rejections = append(rejections, Rejection{
-			Setting: string(vllm.SettingMaxNumBatchedTokens),
-			Reason: fmt.Sprintf("per-step token budget %d is smaller than the maximum model length %d while chunked prefill is disabled: a prompt could never be scheduled in one step",
-				eff.maxNumBatchedTokens, eff.maxModelLen),
-		})
+	// prompt must fit in a single step (combinations.go).
+	if rejection := checkBatchingCombination(eff.chunkedPrefill, eff.maxNumBatchedTokens, eff.maxModelLen); rejection != nil {
+		rejections = append(rejections, *rejection)
 	}
 
 	if eff.chunkedPrefill {
@@ -189,28 +185,8 @@ func resolveEffective(cfg *vllm.Config, metadata *profile.Metadata, req Request,
 	eff.maxLoras = resolveMaxLoras(cfg, metadata)
 
 	// Ports must stay distinct: the frontend, the control API, and the KV-event
-	// publisher share the Pod network namespace.
-	ports := map[string]int{
-		"inference": eff.inferencePort,
-		"handshake": eff.handshakePort,
-		"control":   names.ControlPort,
-	}
-	if eff.kvEvents.enabled && eff.kvEvents.port > 0 {
-		ports["kv-events"] = eff.kvEvents.port
-	}
-	seen := make(map[int]string, len(ports))
-	for _, name := range sortedKeysOf(ports) {
-		port := ports[name]
-		if prior, clash := seen[port]; clash {
-			rejections = append(rejections, Rejection{
-				Setting: "ports",
-				Reason: fmt.Sprintf("the %s port %d collides with the %s port in the same Pod network namespace; one of them must be changed",
-					name, port, prior),
-			})
-			continue
-		}
-		seen[port] = name
-	}
+	// publisher share the Pod network namespace (combinations.go).
+	rejections = append(rejections, checkPortCollisions(podPorts(eff))...)
 
 	return eff, rejections
 }
@@ -287,6 +263,18 @@ func resolveSchedulingPolicy(cfg *vllm.Config, metadata *profile.Metadata, warni
 	return "", warnings
 }
 
+// simulatorReplaySupport reports whether the pinned simulator build implements the
+// KV-event replay endpoint. The pinned build does not: its ready response always
+// reports replay_endpoint null and its publisher has no responder
+// (docs/upstream-vllm-vcr.md), so every explicit replay request is rejected with a
+// reason that names the pin. Re-pinning a build that implements replay changes this
+// function and the profile capability gate below it, not the policy table.
+func simulatorReplaySupport() error {
+	return fmt.Errorf(
+		"the pinned vllm-vcr release %s has no KV-event replay endpoint: its ready response always reports replay_endpoint null, so a consumer that loses the event window could never re-synchronize; remove replay_endpoint or re-pin a simulator release that implements it",
+		names.SupportedSimulatorTag)
+}
+
 // resolveKVEvents resolves the KV-cache event publisher configuration.
 func resolveKVEvents(cfg *vllm.Config, metadata *profile.Metadata, req Request, eff effective, warnings []string) (kvEventsSettings, []string, Rejections) {
 	var rejections Rejections
@@ -297,18 +285,31 @@ func resolveKVEvents(cfg *vllm.Config, metadata *profile.Metadata, req Request, 
 	}
 	setting := string(vllm.SettingKVEventsConfig)
 
+	// KV-event replay is rejected outright for the pinned simulator build, which
+	// has no replay responder: an explicit replay endpoint would promise a
+	// re-synchronization that can never happen. The pin check is deliberately the
+	// broader gate and runs first; the profile capability check stays as the
+	// narrower second gate, so re-pinning a simulator that implements replay
+	// relaxes exactly one decision (simulatorReplaySupport) instead of two.
+	if strings.TrimSpace(stringValue(events.ReplayEndpoint)) != "" {
+		switch replayErr := simulatorReplaySupport(); {
+		case replayErr != nil:
+			rejections = append(rejections, Rejection{Setting: setting, Reason: replayErr.Error()})
+		default:
+			if err := profile.RequireCapability(metadata, profile.CapabilityKVEventReplay); err != nil {
+				rejections = append(rejections, Rejection{Setting: setting, Reason: err.Error()})
+			} else {
+				warnings = append(warnings, fmt.Sprintf(
+					"%s: KV-event replay is authorized by profile capabilities.kvEventReplay, but the pinned simulator publishes live events only: a consumer that loses the event window cannot be re-synchronized from the engine",
+					setting))
+			}
+		}
+	}
+
 	// An explicit --kv-events-config publishes events unless it disables them; a
 	// "null" publisher is vLLM's way of asking for no publisher at all.
 	enabled := (events.Enable == nil || *events.Enable) && !strings.EqualFold(stringValue(events.Publisher), "null")
 	if !enabled {
-		if events.ReplayEndpoint != nil && *events.ReplayEndpoint != "" {
-			// Replay is meaningless without live events; report it rather than
-			// silently dropping the request.
-			rejections = append(rejections, Rejection{
-				Setting: setting,
-				Reason:  "a replay endpoint is configured while events are disabled, so the request cannot be honored",
-			})
-		}
 		return out, warnings, rejections
 	}
 
@@ -365,16 +366,9 @@ func resolveKVEvents(cfg *vllm.Config, metadata *profile.Metadata, req Request, 
 		}
 	}
 
-	if endpoint := stringValue(events.ReplayEndpoint); endpoint != "" {
-		if err := profile.RequireCapability(metadata, profile.CapabilityKVEventReplay); err != nil {
-			rejections = append(rejections, Rejection{Setting: setting, Reason: err.Error()})
-		} else {
-			warnings = append(warnings, fmt.Sprintf(
-				"%s: KV-event replay is authorized by profile capabilities.kvEventReplay, but the pinned simulator publishes live events only: a consumer that loses the event window cannot be re-synchronized from the engine",
-				setting))
-		}
-	}
-
+	// The replay endpoint is not a simulator flag: it is advertised in the ready
+	// response, which the pinned build always reports as null, so there is nothing
+	// to forward. The gate above already rejected an explicit one.
 	out.enabled = true
 	out.endpoint = fmt.Sprintf("tcp://*:%d", names.KVEventsPort)
 	out.port = names.KVEventsPort
@@ -482,17 +476,6 @@ func intValue(v *int) int {
 		return 0
 	}
 	return *v
-}
-
-// sortedKeysOf returns the keys of a string-keyed map with an integer value in
-// sorted order.
-func sortedKeysOf(in map[string]int) []string {
-	keys := make([]string, 0, len(in))
-	for key := range in {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // sortedKeysOfRaw returns the keys of a JSON object in sorted order.

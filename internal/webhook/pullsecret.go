@@ -16,7 +16,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/opendatahub-io/vllm-vcr-operator/internal/credentials"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
 )
 
 const (
@@ -35,36 +37,51 @@ const (
 // irrelevant; a copy is compared byte for byte before it is reused.
 const projectedSecretBytes = 8
 
-// projectPullSecrets copies the pull credentials of the selected profile into the
-// workload namespace and returns the name of the copy to reference.
+// projectPullSecrets copies the pull credentials the selected profile image needs
+// into the workload namespace and returns the name of the copy to reference.
 //
-// Sources are Secret names in the operator namespace. Their docker config payloads
-// are merged into one document, because a Pod may only reference whole Secrets and
-// a profile may need credentials for more than one registry. When no source is
-// configured, nothing is projected and the Pod keeps only its own pull secrets.
+// Sources are Secret names in the operator namespace. What is projected depends on
+// how the environment configured them (spec.imagePullSecrets and
+// spec.profiles[].pullSecretName):
 //
-// The copy is named after the set of sources, not after its content: rotating a
-// credential then updates one copy instead of leaving the old one behind, and every
-// Pod that needs the same credentials references the same Secret. An existing copy
-// is only written when its payload differs.
+//   - a profile's explicit pullSecretName is projected as configured. The operator
+//     chose it for exactly this profile, so it is not second-guessed;
+//   - otherwise the environment-wide list is a candidate list. Only entries whose
+//     docker config covers the selected image's registry host are projected, and
+//     when no candidate does, nothing is projected: the pull proceeds anonymously
+//     rather than copying unrelated registry credentials into the namespace.
+//
+// The merged payload is one document, because a Pod may only reference whole
+// Secrets. The copy is named after the set of sources, not after its content:
+// rotating a credential then updates one copy instead of leaving the old one
+// behind, and every Pod that needs the same credentials references the same Secret.
+// An existing copy is only written when its payload differs.
 //
 // The payload never leaves this function: the returned name and every error name
 // Secrets and registry hosts only. dryRun skips the write but still reads and merges
 // the sources, so a dry-run request fails or succeeds for exactly the same reasons
 // as a real one and produces the same response.
-func (m *PodMutator) projectPullSecrets(ctx context.Context, pod *corev1.Pod, sources []string, dryRun bool) (string, error) {
-	if len(sources) == 0 {
+func (m *PodMutator) projectPullSecrets(ctx context.Context, pod *corev1.Pod, admission *plan.Admission, dryRun bool) (string, error) {
+	if admission == nil || len(admission.PullSecrets) == 0 {
 		return "", nil
 	}
-	payload, err := m.mergePullSecrets(ctx, sources)
+	required := strings.TrimSpace(admission.ProfilePullSecret) != ""
+	merged, err := m.mergePullSecrets(ctx, admission.PullSecrets, credentials.ImageHost(admission.Profile.Image), required)
 	if err != nil {
 		return "", err
 	}
-	name := names.PullSecretPrefix + hex.EncodeToString(sourceDigest(sources))
+	if merged == nil {
+		// No configured Secret can authenticate a pull of this image's registry.
+		return "", nil
+	}
+	// The copy is named after the sources that actually contributed an entry, not
+	// after every candidate: two profiles served from different registries must not
+	// share one copy whose payload then depends on which Pod was admitted last.
+	name := names.PullSecretPrefix + hex.EncodeToString(sourceDigest(merged.sources))
 	if dryRun {
 		return name, nil
 	}
-	if err := m.ensurePullSecret(ctx, pod, name, payload); err != nil {
+	if err := m.ensurePullSecret(ctx, pod, name, merged.payload); err != nil {
 		return "", err
 	}
 	return name, nil
@@ -81,15 +98,23 @@ func sourceDigest(sources []string) []byte {
 	return sum[:projectedSecretBytes]
 }
 
-// mergePullSecrets merges the docker config payloads of the source Secrets.
+// mergePullSecrets merges the docker config payloads of the source Secrets, keeping
+// only entries that can apply to the selected image.
+//
+// A non-empty imageHost limits the result to credentials for that registry. required
+// reports that the sources are the profile's explicit override, which is projected
+// whole: the operator selected it for this profile, so its other entries are not
+// dropped. When the merge keeps no entry at all, the result is nil and the caller
+// projects nothing.
 //
 // The merge is strict: two sources that carry credentials for the same registry
 // would make the copy depend on ordering, so that configuration is reported rather
 // than resolved by precedence. Output is sorted by registry host, so an unchanged
 // set of sources always produces the same payload.
-func (m *PodMutator) mergePullSecrets(ctx context.Context, sources []string) ([]byte, error) {
+func (m *PodMutator) mergePullSecrets(ctx context.Context, sources []string, imageHost string, required bool) (*mergedPullSecret, error) {
 	auths := make(map[string]json.RawMessage)
 	origin := make(map[string]string, len(sources))
+	contributing := make([]string, 0, len(sources))
 
 	for _, source := range sources {
 		key := types.NamespacedName{Namespace: m.operatorNamespace, Name: source}
@@ -98,7 +123,7 @@ func (m *PodMutator) mergePullSecrets(ctx context.Context, sources []string) ([]
 			// The API client error names the resource; it never carries its data.
 			return nil, fmt.Errorf("pull Secret %s cannot be read: %w", key, err)
 		}
-		entries, err := dockerConfigAuths(secret)
+		entries, err := credentials.Auths(secret)
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +132,13 @@ func (m *PodMutator) mergePullSecrets(ctx context.Context, sources []string) ([]
 			hosts = append(hosts, host)
 		}
 		sort.Strings(hosts)
+		contributed := false
 		for _, host := range hosts {
+			if !required && imageHost != "" && credentials.NormalizeHost(host) != imageHost {
+				// A credential for another registry cannot authenticate this pull;
+				// copying it would spread unrelated credentials.
+				continue
+			}
 			if prior, taken := origin[host]; taken {
 				return nil, fmt.Errorf(
 					"pull Secrets %s and %s both carry credentials for registry %q: the merged pull Secret would be ambiguous",
@@ -115,7 +146,14 @@ func (m *PodMutator) mergePullSecrets(ctx context.Context, sources []string) ([]
 			}
 			origin[host] = key.String()
 			auths[host] = entries[host]
+			contributed = true
 		}
+		if contributed {
+			contributing = append(contributing, source)
+		}
+	}
+	if len(auths) == 0 {
+		return nil, nil
 	}
 
 	document := struct {
@@ -125,38 +163,18 @@ func (m *PodMutator) mergePullSecrets(ctx context.Context, sources []string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("the merged pull Secret cannot be encoded: %w", err)
 	}
-	return payload, nil
+	return &mergedPullSecret{payload: payload, sources: contributing}, nil
 }
 
-// dockerConfigAuths returns the registry entries of one pull Secret.
+// mergedPullSecret is the payload projected into the workload namespace together
+// with the sources that contributed to it.
 //
-// Both the current "kubernetes.io/dockerconfigjson" key and the legacy
-// ".dockercfg" key are accepted, exactly as a kubelet accepts them. Entries are
-// kept as raw JSON so a credential field this operator does not model survives the
-// merge untouched.
-func dockerConfigAuths(secret *corev1.Secret) (map[string]json.RawMessage, error) {
-	if raw, ok := secret.Data[corev1.DockerConfigJsonKey]; ok {
-		var document struct {
-			Auths map[string]json.RawMessage `json:"auths"`
-		}
-		if err := json.Unmarshal(raw, &document); err != nil {
-			// The decoder error can quote bytes of the document, which is
-			// credential material, so it is deliberately not wrapped.
-			return nil, fmt.Errorf("pull Secret %s/%s: key %q is not a docker config JSON document",
-				secret.Namespace, secret.Name, corev1.DockerConfigJsonKey)
-		}
-		return document.Auths, nil
-	}
-	if raw, ok := secret.Data[corev1.DockerConfigKey]; ok {
-		var legacy map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &legacy); err != nil {
-			return nil, fmt.Errorf("pull Secret %s/%s: key %q is not a docker config JSON document",
-				secret.Namespace, secret.Name, corev1.DockerConfigKey)
-		}
-		return legacy, nil
-	}
-	return nil, fmt.Errorf("pull Secret %s/%s: neither %q nor %q is present: only docker config pull Secrets can be projected",
-		secret.Namespace, secret.Name, corev1.DockerConfigJsonKey, corev1.DockerConfigKey)
+// The contributing set, not the candidate list, names the copy: candidates that
+// carry no credential for the selected image must not make two profiles share one
+// Secret whose payload depends on admission order.
+type mergedPullSecret struct {
+	payload []byte
+	sources []string
 }
 
 // ensurePullSecret creates the projected copy, or reuses an existing one whose

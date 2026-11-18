@@ -3,7 +3,6 @@ package translator
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -37,6 +36,12 @@ func frontendInvocation(cfg *vllm.Config, eff effective, env Environment, preser
 	// Serving endpoint: re-emitted from the effective value so that an
 	// environment-derived host or port is applied identically to a flag.
 	args = append(args, "--host", eff.inferenceHost, "--port", strconv.Itoa(eff.inferencePort))
+
+	// Maximum model length is enforced by both processes (specification,
+	// "Settings policy"): the frontend would otherwise advertise and accept
+	// prompts up to the model artifact's own maximum, while the simulator only
+	// reproduces the recorded coverage. Both receive the same resolved bound.
+	args = append(args, "--max-model-len", strconv.FormatInt(eff.maxModelLen, 10))
 
 	// External-engine mode. data-parallel-size-local=0 is what makes the frontend
 	// wait for an externally registered engine instead of starting one; the RPC
@@ -94,60 +99,37 @@ func frontendInvocation(cfg *vllm.Config, eff effective, env Environment, preser
 
 // backendInvocation builds the simulator container invocation.
 //
-// Every argument is a real vllm-vcr `play` flag; the MOCK_* variables of the
-// example manifests are entrypoint-script inventions and are not used. The
+// Every argument comes from SimulatorCommand, the builder the spikes also use, so
+// the shipped flags and the flags the evidence was produced with cannot drift. The
 // simulator emits no Prometheus metrics and has no GPU-only flag: metrics come from
 // the frontend, and the simulator records timing and tokens.
 func backendInvocation(cfg *vllm.Config, eff effective, env Environment, metadata *profile.Metadata, podIdentity string) plan.Invocation {
-	args := []string{
-		"--handshake-address", handshakeAddress(eff),
-		"--model-name", modelName(cfg),
-		"--max-model-len", strconv.FormatInt(eff.maxModelLen, 10),
-		"--tokens-per-block", strconv.FormatInt(eff.blockSize, 10),
-		"--kv-cache-size", strconv.FormatInt(eff.kvBlocks, 10),
-		"--shutdown-timeout", strconv.Itoa(eff.shutdownTimeout),
-		"--seed", strconv.Itoa(eff.seed),
-		// The control API is the only in-Pod witness for replay match rates and
-		// request statistics. It is JSON, not a metrics endpoint, and its address
-		// is a plain HOST:PORT socket address, not a ZMQ endpoint: the simulator
-		// hands it straight to TcpListener::bind, which rejects a "tcp://" scheme
-		// ("vllm-vcr play --control-address HOST:PORT", upstream
-		// docs/control-api.md:3, entrypoint.sh:76, src/control.rs:319).
-		"--control-address", fmt.Sprintf("0.0.0.0:%d", names.ControlPort),
+	trace := resolveRecordedTrace(metadata)
+	input := SimulatorInput{
+		HandshakeAddress:    handshakeAddress(eff),
+		ModelName:           modelName(cfg),
+		MaxModelLen:         eff.maxModelLen,
+		TokensPerBlock:      eff.blockSize,
+		KVBlocks:            eff.kvBlocks,
+		ShutdownTimeout:     eff.shutdownTimeout,
+		Seed:                eff.seed,
+		ControlAddress:      fmt.Sprintf("0.0.0.0:%d", names.ControlPort),
+		MaxNumSeqs:          eff.maxNumSeqs,
+		MaxNumBatchedTokens: eff.maxNumBatchedTokens,
+		LongPrefillTokens:   eff.longPrefillTokens,
+		ChunkedPrefill:      eff.chunkedPrefill,
+		SchedulingPolicy:    eff.schedulingPolicy,
+		LogRequests:         eff.logRequests,
+		EngineID:            podIdentity,
+		MaxLoras:            eff.maxLoras,
+		PDRole:              eff.pdRole,
+		KVEvents:            eff.kvEvents.enabled,
+		KVEventsEndpoint:    eff.kvEvents.endpoint,
+		KVEventsTopic:       eff.kvEvents.topic,
+		LatencyTracePath:    trace.latencyPath,
+		ReplayTokensPath:    trace.replayPath,
+		ExpectConfigHash:    trace.configHash,
 	}
-	if eff.maxNumSeqs > 0 {
-		args = append(args, "--max-num-seqs", strconv.FormatInt(eff.maxNumSeqs, 10))
-	}
-	if eff.maxNumBatchedTokens > 0 {
-		args = append(args, "--max-num-batched-tokens", strconv.FormatInt(eff.maxNumBatchedTokens, 10))
-	}
-	if eff.chunkedPrefill {
-		args = append(args, "--long-prefill-token-threshold", strconv.FormatInt(eff.longPrefillTokens, 10))
-	}
-	if eff.schedulingPolicy != "" {
-		args = append(args, "--scheduling-policy", eff.schedulingPolicy)
-	}
-	if eff.logRequests {
-		args = append(args, "--log-requests")
-	}
-	if identity := strings.TrimSpace(podIdentity); identity != "" {
-		// A stable engine id keeps the ready-response instance id and the default
-		// KV-event topic tied to the Pod rather than to a process-local default.
-		args = append(args, "--engine-id", identity)
-	}
-	if eff.maxLoras > 0 {
-		args = append(args, "--max-loras", strconv.Itoa(eff.maxLoras))
-	}
-	if eff.pdRole != "" && eff.pdRole != "both" {
-		args = append(args, "--pd-role", eff.pdRole)
-	}
-	if eff.kvEvents.enabled {
-		args = append(args, "--enable-kv-cache-events", "--kv-events-endpoint", eff.kvEvents.endpoint)
-		if eff.kvEvents.topic != "" {
-			args = append(args, "--kv-events-topic", eff.kvEvents.topic)
-		}
-	}
-	args = append(args, traceArgs(metadata)...)
 
 	ports := []corev1.ContainerPort{
 		{Name: "vcr-control", ContainerPort: int32(names.ControlPort), Protocol: corev1.ProtocolTCP},
@@ -162,37 +144,39 @@ func backendInvocation(cfg *vllm.Config, eff effective, env Environment, metadat
 
 	return plan.Invocation{
 		Image:   env.Images.Backend,
-		Command: append([]string{"vllm-vcr", "play"}, args...),
+		Command: SimulatorCommand(input),
 		Env:     []corev1.EnvVar{{Name: "RUST_LOG", Value: env.LogLevel}},
 		Ports:   ports,
 	}
 }
 
-// traceArgs returns the recorded-profile arguments the simulator replays.
+// recordedTrace is the resolved trace content the simulator is pointed at: the
+// recorded latency trace always (the policy rejects a profile without one), and the
+// recorded token trace only when the profile authorizes content-identical replay.
+type recordedTrace struct {
+	latencyPath string
+	replayPath  string
+	configHash  string
+}
+
+// traceSettings resolves the recorded-profile arguments.
 //
-// Timing always comes from the profile's latency trace: the policy rejects a
-// profile without one, because serving on synthetic timing would misrepresent the
-// recorded hardware. Content replay is separate: it is requested only when the
-// profile authorizes content-identical replay with recorded token ids.
-func traceArgs(metadata *profile.Metadata) []string {
+// Timing always comes from the profile's latency trace: the policy rejects a profile
+// without one, because serving on synthetic timing would misrepresent the recorded
+// hardware. Content replay is separate: it is requested only when the profile
+// authorizes content-identical replay with recorded token ids, and the config hash is
+// compared only when the profile records one.
+func resolveRecordedTrace(metadata *profile.Metadata) recordedTrace {
 	if metadata == nil || metadata.Trace.File == "" {
-		return nil
+		return recordedTrace{}
 	}
-	tracePath := names.ProfileMountPath + "/" + metadata.Trace.File
-	args := []string{"--latency-trace", tracePath}
+	path := names.ProfileMountPath + "/" + metadata.Trace.File
+	out := recordedTrace{latencyPath: path}
 	if metadata.Supports(profile.CapabilityContentReplay) {
-		args = append(args,
-			"--replay-tokens", tracePath,
-			// Live clients (routers, load generators) do not use the replay
-			// harness's request ids, so prefix matching against the recorded block
-			// hashes is the only match mode that works for them.
-			"--replay-match", "prefix",
-		)
+		out.replayPath = path
 	}
-	if hash := profile.ConfigHashValue(metadata.VLLM.ConfigHash); hash != "" {
-		args = append(args, "--expect-config-hash", hash)
-	}
-	return args
+	out.configHash = profile.ConfigHashValue(metadata.VLLM.ConfigHash)
+	return out
 }
 
 // provisionerInvocation builds the init container that exports the profile into

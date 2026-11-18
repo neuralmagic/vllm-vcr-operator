@@ -38,7 +38,7 @@ func ValidateOverrides(req Requirements, m *Metadata) error {
 	checkRange("maxNumSeqs", "--max-num-seqs", req.MaxNumSeqs, m.Coverage.MaxNumSeqs)
 	checkRange("maxNumBatchedTokens", "--max-num-batched-tokens", req.MaxNumBatchedTokens, m.Coverage.MaxNumBatchedTokens)
 	checkRange("longPrefillTokenThreshold", "--long-prefill-token-threshold", req.LongPrefillTokenThreshold, m.Coverage.LongPrefillTokenThreshold)
-	checkRange("kvBlocks", "--kv-cache-memory-bytes", req.KVBlocks, m.Coverage.KVBlocks)
+	checkRange("kvBlocks", "--num-gpu-blocks-override", req.KVBlocks, m.Coverage.KVBlocks)
 
 	if policy := strings.TrimSpace(req.SchedulingPolicy); policy != "" {
 		if len(m.Coverage.SchedulingPolicies) == 0 {

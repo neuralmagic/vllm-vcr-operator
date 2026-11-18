@@ -60,7 +60,7 @@ func Mutate(pod *corev1.Pod, admission *plan.Admission) (*corev1.Pod, error) {
 		return nil, fmt.Errorf("runtime: no admission plan: a Pod is only mutated with a translation result")
 	}
 
-	if alreadyInjected(pod) {
+	if AlreadyInjected(pod) {
 		return pod.DeepCopy(), nil
 	}
 
@@ -111,24 +111,62 @@ func Mutate(pod *corev1.Pod, admission *plan.Admission) (*corev1.Pod, error) {
 	return out, nil
 }
 
-// alreadyInjected reports whether this operator already mutated the Pod. The
+// AlreadyInjected reports whether this operator already mutated the Pod. The
 // injected annotation alone is not enough: the annotation and the injected
 // containers together identify a complete layout.
-func alreadyInjected(pod *corev1.Pod) bool {
-	if pod.Annotations[names.InjectedAnnotation] == "" {
+//
+// It is exported because admission must apply exactly the same rule before it does
+// any work: two definitions of "what an injected Pod looks like" would drift, and a
+// Pod recognized by one and not the other would be translated twice.
+func AlreadyInjected(pod *corev1.Pod) bool {
+	if pod == nil || pod.Annotations[names.InjectedAnnotation] == "" {
 		return false
 	}
-	return hasContainer(pod.Spec.Containers, names.BackendContainerName) &&
-		hasContainer(pod.Spec.InitContainers, names.ProvisionerContainerName)
+	return HasContainer(pod.Spec.Containers, names.BackendContainerName) &&
+		HasContainer(pod.Spec.InitContainers, names.ProvisionerContainerName)
 }
 
-func hasContainer(containers []corev1.Container, name string) bool {
+// HasContainer reports whether the named container is present. It is exported for
+// the same reason as AlreadyInjected.
+func HasContainer(containers []corev1.Container, name string) bool {
 	for _, container := range containers {
 		if container.Name == name {
 			return true
 		}
 	}
 	return false
+}
+
+// RequestsSyntheticDevice reports whether any container or init container requests
+// or limits the synthetic device. It is the applicability rule of
+// docs/contracts/admission.md, shared by admission and mutation.
+func RequestsSyntheticDevice(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	return len(SyntheticDeviceOwners(pod.Spec.Containers)) > 0 ||
+		len(SyntheticDeviceOwners(pod.Spec.InitContainers)) > 0
+}
+
+// SyntheticDeviceOwners returns the indexes of the containers that request or limit
+// the synthetic device, in order.
+//
+// Exactly one entry authorizes translation: it is the container whose entrypoint is
+// replaced and whose allocation is preserved. Callers that need to reject a Pod with
+// several owners use the indexes to name them.
+func SyntheticDeviceOwners(containers []corev1.Container) []int {
+	var owners []int
+	for i := range containers {
+		if _, ok := SyntheticDeviceQuantity(containers[i].Resources); ok {
+			owners = append(owners, i)
+		}
+	}
+	return owners
+}
+
+// SyntheticDeviceQuantity returns a container's synthetic device allocation.
+func SyntheticDeviceQuantity(resources corev1.ResourceRequirements) (resource.Quantity, bool) {
+	return gpuQuantityOf(resources)
 }
 
 // findWorkloadContainer returns the index of the container whose GPU allocation is
@@ -138,35 +176,23 @@ func hasContainer(containers []corev1.Container, name string) bool {
 // whose entrypoint is replaced, and a Pod with two GPU consumers cannot be
 // translated without deciding which one owns the allocation.
 func findWorkloadContainer(pod *corev1.Pod) (int, resource.Quantity, error) {
-	found := -1
-	var quantity resource.Quantity
-	described := make([]string, 0, 2)
-
-	for i := range pod.Spec.Containers {
-		container := &pod.Spec.Containers[i]
-		value, ok := gpuQuantityOf(container.Resources)
-		if !ok {
-			continue
-		}
-		described = append(described, container.Name)
-		if found >= 0 {
-			continue
-		}
-		found = i
-		quantity = value
-	}
-
-	switch {
-	case found < 0:
-		return 0, quantity, fmt.Errorf(
+	owners := SyntheticDeviceOwners(pod.Spec.Containers)
+	if len(owners) == 0 {
+		return 0, resource.Quantity{}, fmt.Errorf(
 			"runtime: no container requests %s: the Pod is not applicable and must not be mutated",
 			names.SyntheticResourceName)
-	case len(described) > 1:
+	}
+	quantity, _ := SyntheticDeviceQuantity(pod.Spec.Containers[owners[0]].Resources)
+	if len(owners) > 1 {
+		described := make([]string, 0, len(owners))
+		for _, index := range owners {
+			described = append(described, pod.Spec.Containers[index].Name)
+		}
 		return 0, quantity, fmt.Errorf(
 			"runtime: containers %s all request %s: exactly one workload container may own the synthetic allocation",
 			strings.Join(described, ", "), names.SyntheticResourceName)
 	}
-	return found, quantity, nil
+	return owners[0], quantity, nil
 }
 
 // gpuQuantityOf returns the container's synthetic device allocation.
@@ -181,55 +207,28 @@ func gpuQuantityOf(resources corev1.ResourceRequirements) (resource.Quantity, bo
 	return resource.Quantity{}, false
 }
 
-// checkInitContainers rejects a GPU-dependent init container the translator does
-// not recognize. An init container is never dropped silently: either it is a
-// recognized setup step that can run without a GPU, or the Pod cannot be
-// translated as a whole.
+// checkInitContainers rejects any init container that requests or limits the
+// synthetic device.
+//
+// A GPU-dependent setup step cannot be translated safely as a whole: the operator
+// replaces the GPU engine with a simulator, and an init container that asks for a
+// device would either hold the allocation the workload container must own
+// (docs/contracts/admission.md: exactly one container requests the original
+// quantity) or run accelerator code on a node that has none. Guessing from a
+// container's name or command which setup steps are really GPU-free is exactly the
+// kind of approximation the policy rejects, so this release refuses them all and
+// says so by name. An init container that requests no device is preserved
+// unchanged.
 func checkInitContainers(pod *corev1.Pod) error {
 	for _, container := range pod.Spec.InitContainers {
 		if _, ok := gpuQuantityOf(container.Resources); !ok {
 			continue
 		}
-		if recognizedGPUInitContainer(container) {
-			continue
-		}
 		return fmt.Errorf(
-			"runtime: init container %q requests %s and is not a recognized weight-download step: a GPU-dependent setup step cannot be translated",
-			container.Name, names.SyntheticResourceName)
+			"runtime: init container %q requests %s: GPU-dependent init containers are not translated by this release, so the Pod cannot be simulated as a whole; remove the %s request or run the setup step outside the Pod",
+			container.Name, names.SyntheticResourceName, names.SyntheticResourceName)
 	}
 	return nil
-}
-
-// gpuInitContainerNameHints are name fragments of setup steps that fetch model
-// artifacts, which is the only GPU-dependent init-container pattern this operator
-// understands.
-var gpuInitContainerNameHints = []string{"download", "fetch", "weights", "loader"}
-
-// gpuInitContainerCommandHints are command fragments of artifact fetchers.
-var gpuInitContainerCommandHints = []string{
-	"huggingface-cli", "hf", "git", "wget", "curl", "aws", "gsutil", "gs",
-}
-
-// recognizedGPUInitContainer reports whether an init container is a known
-// artifact-download step. Such a step keeps its GPU allocation and is preserved
-// verbatim: it schedules against the same synthetic devices and does not run the
-// model server.
-func recognizedGPUInitContainer(container corev1.Container) bool {
-	name := strings.ToLower(container.Name)
-	for _, hint := range gpuInitContainerNameHints {
-		if strings.Contains(name, hint) {
-			return true
-		}
-	}
-	for _, token := range append(append([]string{}, container.Command...), container.Args...) {
-		lower := strings.ToLower(token)
-		for _, hint := range gpuInitContainerCommandHints {
-			if lower == hint || strings.HasSuffix(lower, "/"+hint) || strings.Contains(lower, hint+" ") {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // rewriteFrontendContainer turns the workload's vLLM container into the frontend

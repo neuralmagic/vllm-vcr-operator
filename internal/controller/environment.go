@@ -21,45 +21,9 @@ import (
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/registry"
 )
 
-// Condition types published on the SimulationEnvironment.
-const (
-	// ConditionReady is true only when every configured profile has usable
-	// metadata and the device plugin runs on every node it is scheduled for.
-	ConditionReady = "Ready"
-	// ConditionProfilesReconciled reports whether status.profiles is a complete,
-	// usable catalog for admission.
-	ConditionProfilesReconciled = "ProfilesReconciled"
-	// ConditionDevicePluginReady reports whether the synthetic device plugin is
-	// advertising capacity on the simulation nodes.
-	ConditionDevicePluginReady = "DevicePluginReady"
-)
-
-// Condition reasons. Each one names the action an operator must take.
-const (
-	// ReasonEnvironmentReady: profiles and device plugin are both reconciled.
-	ReasonEnvironmentReady = "EnvironmentReady"
-	// ReasonProfilesNotReconciled: at least one profile is unusable, so
-	// admission cannot build a catalog.
-	ReasonProfilesNotReconciled = "ProfilesNotReconciled"
-	// ReasonDevicePluginNotReady: the device plugin DaemonSet is not ready, so
-	// synthetic GPUs are not advertised on every simulation node.
-	ReasonDevicePluginNotReady = "DevicePluginNotReady"
-
-	// ReasonAllProfilesUsable: every configured profile resolved and parsed.
-	ReasonAllProfilesUsable = "AllProfilesUsable"
-	// ReasonProfileUnusable: a profile image resolved but its metadata violates
-	// the profile image contract. Only a spec change (a different image) fixes it.
-	ReasonProfileUnusable = "ProfileUnusable"
-	// ReasonRegistryUnavailable: a registry or pull-credential failure prevented
-	// reconciliation. It is retried automatically.
-	ReasonRegistryUnavailable = "RegistryUnavailable"
-
-	// ReasonDaemonSetReady: the device plugin runs on every scheduled node.
-	ReasonDaemonSetReady = "DaemonSetReady"
-	// ReasonDaemonSetNotReady: the device plugin is missing or not ready on at
-	// least one scheduled node.
-	ReasonDaemonSetNotReady = "DaemonSetNotReady"
-)
+// Condition types and reasons are part of the API surface: they live in
+// api/v1alpha1 so that every reader of status names the same strings without
+// importing this package (see the package documentation there).
 
 // DefaultRetryInterval is how long a failed profile resolution waits before it
 // is retried. Registry outages and missing pull Secrets heal without a spec
@@ -297,9 +261,9 @@ func (r *SimulationEnvironmentReconciler) desiredStatus(
 		Conditions:           append([]metav1.Condition(nil), env.Status.Conditions...),
 	}
 
-	setCondition(&status, ConditionProfilesReconciled, profiles.condition())
-	setCondition(&status, ConditionDevicePluginReady, devicePluginCondition(devicePlugin, r.DevicePlugin))
-	setCondition(&status, ConditionReady, readyCondition(&status))
+	setCondition(&status, vcrv1alpha1.ConditionProfilesReconciled, profiles.condition())
+	setCondition(&status, vcrv1alpha1.ConditionDevicePluginReady, devicePluginCondition(devicePlugin, r.DevicePlugin))
+	setCondition(&status, vcrv1alpha1.ConditionReady, readyCondition(&status))
 	return status
 }
 
@@ -315,11 +279,11 @@ func (r *SimulationEnvironmentReconciler) recordConditionChanges(env *vcrv1alpha
 	if r.Recorder == nil {
 		return
 	}
-	profiles := meta.FindStatusCondition(env.Status.Conditions, ConditionProfilesReconciled)
+	profiles := meta.FindStatusCondition(env.Status.Conditions, vcrv1alpha1.ConditionProfilesReconciled)
 	if profiles == nil || profiles.Status != metav1.ConditionFalse {
 		return
 	}
-	if prior := meta.FindStatusCondition(previous.Conditions, ConditionProfilesReconciled); prior != nil &&
+	if prior := meta.FindStatusCondition(previous.Conditions, vcrv1alpha1.ConditionProfilesReconciled); prior != nil &&
 		prior.Status == profiles.Status && prior.Reason == profiles.Reason && prior.Message == profiles.Message {
 		return
 	}

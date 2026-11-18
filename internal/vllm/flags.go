@@ -134,7 +134,7 @@ func flags(cfg *Config) []flagSpec {
 		customFlag(SettingSSLCertReqs, func(p *parser, raw string) *Rejection {
 			v, err := strconv.Atoi(raw)
 			if err != nil {
-				return &Rejection{Setting: SettingSSLCertReqs, Value: raw, Reason: "not an integer"}
+				return &Rejection{Setting: string(SettingSSLCertReqs), Value: raw, Reason: "not an integer"}
 			}
 			p.cfg.tls().CertReqs = &v
 			return nil
@@ -285,13 +285,13 @@ func (s *flagSpec) assign(p *parser, raw string) *Rejection {
 	case kindInt:
 		v, err := strconv.Atoi(strings.TrimSpace(raw))
 		if err != nil {
-			return &Rejection{Setting: s.setting, Value: raw, Reason: "not an integer"}
+			return &Rejection{Setting: string(s.setting), Value: raw, Reason: "not an integer"}
 		}
 		*s.iptr = &v
 	case kindFloat:
 		v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
 		if err != nil {
-			return &Rejection{Setting: s.setting, Value: raw, Reason: "not a number"}
+			return &Rejection{Setting: string(s.setting), Value: raw, Reason: "not a number"}
 		}
 		*s.fptr = &v
 	case kindStringList:
@@ -299,7 +299,7 @@ func (s *flagSpec) assign(p *parser, raw string) *Rejection {
 	case kindJSON:
 		m, err := decodeJSONObject(raw)
 		if err != nil {
-			return &Rejection{Setting: s.setting, Value: raw, Reason: err.Error()}
+			return &Rejection{Setting: string(s.setting), Value: raw, Reason: err.Error()}
 		}
 		*s.jptr = m
 	case kindCustom:
@@ -325,28 +325,28 @@ func (c *Config) tls() *TLSSettings {
 func validateFlags(cfg *Config) Rejections {
 	var rs Rejections
 	if cfg.Server.Port != nil && (*cfg.Server.Port < 1 || *cfg.Server.Port > 65535) {
-		rs = append(rs, Rejection{Setting: SettingPort, Value: fmt.Sprint(*cfg.Server.Port), Reason: "not a valid TCP port"})
+		rs = append(rs, Rejection{Setting: string(SettingPort), Value: fmt.Sprint(*cfg.Server.Port), Reason: "not a valid TCP port"})
 	}
 	if cfg.Parallel.TensorParallelSize != nil && *cfg.Parallel.TensorParallelSize < 1 {
-		rs = append(rs, Rejection{Setting: SettingTensorParallelSize, Value: fmt.Sprint(*cfg.Parallel.TensorParallelSize), Reason: "must be at least 1"})
+		rs = append(rs, Rejection{Setting: string(SettingTensorParallelSize), Value: fmt.Sprint(*cfg.Parallel.TensorParallelSize), Reason: "must be at least 1"})
 	}
 	if cfg.Parallel.PipelineParallelSize != nil && *cfg.Parallel.PipelineParallelSize < 1 {
-		rs = append(rs, Rejection{Setting: SettingPipelineParallel, Value: fmt.Sprint(*cfg.Parallel.PipelineParallelSize), Reason: "must be at least 1"})
+		rs = append(rs, Rejection{Setting: string(SettingPipelineParallel), Value: fmt.Sprint(*cfg.Parallel.PipelineParallelSize), Reason: "must be at least 1"})
 	}
 	if cfg.Cache.BlockSize != nil && *cfg.Cache.BlockSize < 1 {
-		rs = append(rs, Rejection{Setting: SettingBlockSize, Value: fmt.Sprint(*cfg.Cache.BlockSize), Reason: "must be at least 1"})
+		rs = append(rs, Rejection{Setting: string(SettingBlockSize), Value: fmt.Sprint(*cfg.Cache.BlockSize), Reason: "must be at least 1"})
 	}
 	if cfg.Limits.MaxNumSeqs != nil && *cfg.Limits.MaxNumSeqs < 1 {
-		rs = append(rs, Rejection{Setting: SettingMaxNumSeqs, Value: fmt.Sprint(*cfg.Limits.MaxNumSeqs), Reason: "must be at least 1"})
+		rs = append(rs, Rejection{Setting: string(SettingMaxNumSeqs), Value: fmt.Sprint(*cfg.Limits.MaxNumSeqs), Reason: "must be at least 1"})
 	}
 	if cfg.Limits.MaxNumBatchedTokens != nil && *cfg.Limits.MaxNumBatchedTokens < 1 {
-		rs = append(rs, Rejection{Setting: SettingMaxNumBatchedTokens, Value: fmt.Sprint(*cfg.Limits.MaxNumBatchedTokens), Reason: "must be at least 1"})
+		rs = append(rs, Rejection{Setting: string(SettingMaxNumBatchedTokens), Value: fmt.Sprint(*cfg.Limits.MaxNumBatchedTokens), Reason: "must be at least 1"})
 	}
 	if cfg.Memory.GPUMemoryUtilization != nil && (*cfg.Memory.GPUMemoryUtilization <= 0 || *cfg.Memory.GPUMemoryUtilization > 1) {
-		rs = append(rs, Rejection{Setting: SettingGPUMemUtilization, Value: fmt.Sprint(*cfg.Memory.GPUMemoryUtilization), Reason: "must be in (0, 1]"})
+		rs = append(rs, Rejection{Setting: string(SettingGPUMemUtilization), Value: fmt.Sprint(*cfg.Memory.GPUMemoryUtilization), Reason: "must be in (0, 1]"})
 	}
 	if cfg.Scheduling.Policy != nil && *cfg.Scheduling.Policy != "fcfs" && *cfg.Scheduling.Policy != "priority" {
-		rs = append(rs, Rejection{Setting: SettingSchedulingPolicy, Value: *cfg.Scheduling.Policy, Reason: `must be "fcfs" or "priority"`})
+		rs = append(rs, Rejection{Setting: string(SettingSchedulingPolicy), Value: *cfg.Scheduling.Policy, Reason: `must be "fcfs" or "priority"`})
 	}
 	return rs
 }

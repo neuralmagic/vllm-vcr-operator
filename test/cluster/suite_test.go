@@ -16,7 +16,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/controller"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
 )
 
@@ -123,7 +122,7 @@ func (s *suite) stepInstall(t *testing.T) {
 			return false, "", err
 		}
 		for _, condition := range current.Status.Conditions {
-			if condition.Type == controller.ConditionReady {
+			if condition.Type == vcrv1alpha1.ConditionReady {
 				return condition.Status == "True", fmt.Sprintf("Ready=%s (%s: %s)",
 					condition.Status, condition.Reason, condition.Message), nil
 			}
