@@ -12,7 +12,7 @@ frontend is `Dockerfile.supervisor --target frontend`; the real simulator is the
 | --- | --- | --- |
 | `docker.io/vcrlocal/vllm-vcr-frontend-stub:test` | the **real** `vcr-supervisor` (`cmd/supervisor`) and a stub `vllm` program | the Python vLLM frontend in external-engine mode |
 | `docker.io/vcrlocal/vllm-vcr-backend-stub:test` | a stub `vllm-vcr` program | the `vllm-vcr play` simulator |
-| `docker.io/vcrlocal/vllm-vcr-profile-fixture:test` | the **real** `vcr-profile-export` (`cmd/profileexport`) and an OCI profile filesystem (`/profile/metadata.json`, `/profile/trace.jsonl.gz`) | a published recorded profile |
+| `docker.io/vcrlocal/vllm-vcr-profile-fixture:test` | the **real** `vcr-profile-export` (`cmd/profileexport`) at `/usr/local/bin/vcr-profile-export`, which its metadata declares as `provisioning.entrypoint`, and an OCI profile filesystem (`/profile/metadata.json`, `/profile/trace.jsonl.gz`) | a published recorded profile |
 
 The supervisor is *not* a double: the suite asserts its real readiness combination,
 its backend-loss grace period, its termination of the frontend, and its refusal to
@@ -66,12 +66,12 @@ evidence of anything recorded:
 - `capabilities.chatCompletions/completions/streaming: true` — the stub frontend serves
   those endpoints; nothing about model output is claimed.
 
-`profile-fixture/vcr-profile-export-volume` is a wrapper the fixture declares as
-`provisioning.entrypoint`. It runs the real exporter and only relocates the exporter's
-staging directory into the mounted volume, because the operator's provisioner runs with a
-read-only root filesystem and can only write to `/var/run/vcr/profile`. This is a
-**known product defect** (see `test/cluster/README.md`, "Known product defects"); the fix
-belongs in `internal/runtime`, and the wrapper disappears when it lands.
+The fixture runs the real `vcr-profile-export` binary with no wrapper: the operator
+appends the profile volume path as its only argument, and the exporter stages its export
+inside that target directory — the only writable path in the provisioner container, which
+runs with a read-only root filesystem. The suite asserts the provisioner init container
+completes, that the volume holds `metadata.json` plus the trace, and that no staging
+directory is left behind.
 
 ## Building
 

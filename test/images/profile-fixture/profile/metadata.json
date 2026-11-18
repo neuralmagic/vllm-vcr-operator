@@ -43,7 +43,7 @@
     "kvEvents": true
   },
   "provisioning": {
-    "entrypoint": ["/bin/sh", "/usr/local/bin/vcr-profile-export-volume"],
+    "entrypoint": ["/usr/local/bin/vcr-profile-export"],
     "metadataFile": "metadata.json",
     "traceFile": "trace.jsonl.gz"
   },

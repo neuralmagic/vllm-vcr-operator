@@ -237,6 +237,28 @@ kubectl -n <ns> logs <pod> -c vcr-profile-provisioner   # the export summary on 
 kubectl -n vllm-vcr-operator-system logs deploy/vllm-vcr-operator-controller-manager --tail=200
 ```
 
+## Acceptance evidence
+
+Two commands produce the acceptance evidence. They are the only evidence this
+repository generates for a cluster-shaped run, and they are deliberately separate
+because they prove different things:
+
+| Command | What it proves |
+| --- | --- |
+| `make test-e2e` | Admission against a real API server (envtest: etcd + kube-apiserver, the manager in-process): the mutating webhook's provenance annotations, injected layout, and GPU-placement invariants, its idempotency on reinvocation, preserved serving identity, the profile catalog published by reconciliation (from a fake registry, resolved with the configured pull credentials), and the fail-closed rejections with their messages visible to the caller. No kubelet, so nothing is scheduled, pulled, or served. |
+| `make test-cluster` | The specification's primary interface on a real two-node kind cluster with a real kubelet: install from the shipped manifests, device-plugin registration and synthetic capacity, an unchanged GPU-requesting workload admitted and translated, profile provisioning into the shared volume by the real `vcr-profile-export`, readiness through the supervisor, allocation/exhaustion/release, device-plugin restart, and readiness withdrawal. The vLLM frontend and the `vllm-vcr` simulator are test doubles, so nothing about serving fidelity, recorded timing, or token content is claimed. |
+
+Both suites skip — never pass — when their prerequisites are absent, and the
+cluster suite's skip names the missing prerequisite (`VCR_CLUSTER_REQUIRED=1`
+turns that skip into a failure). `make test-spike` remains the only command that
+can produce serving evidence, and it needs the real images.
+
+```
+$ make test-e2e
+$ hack/kind-up.sh && hack/images.sh --build --stub --load && make test-cluster
+$ hack/kind-up.sh --delete            # after the run
+```
+
 ## Cleanup
 
 ```bash

@@ -84,8 +84,7 @@ published by this repository, and none was available locally, so:
 | --- | --- |
 | Serving behavior: generation, streaming, tokenizer consistency, metric names and semantics, random versus recorded tokens, unmatched replay, cache pressure, KV-event publication | `make test-spike` (`test/spike/evidence/serving-behavior.json`) |
 | Runtime layout: startup ordering, readiness transitions, backend loss, frontend loss, coordinated SIGTERM shutdown | `make test-spike` (`test/spike/evidence/runtime-layout.json`) |
-| Admission end to end against a cluster-shaped API server: mutation, provenance annotations, idempotency, rejection | `make test-e2e` |
-| A GPU-free cluster scheduling an unchanged GPU workload and serving it with a real llm-d router | `make test-cluster` |
+| llm-d prefix-cache routing over a simulated engine (router, EPP, discovery decisions) | No automated evidence in this repository. `make test-cluster` keeps the llm-d labels, ports, ServiceAccount, and model-cache volume on a simulated workload, but no llm-d router is installed there, so routing is not exercised |
 | Timing fidelity against a held-out real-GPU capture | Not automated anywhere in this repository. Functional success is not a calibrated performance claim |
 | Any behavior of a published profile image | No profile image release exists |
 
@@ -94,10 +93,14 @@ published by this repository, and none was available locally, so:
 mistake a skip for a pass. `test/spike/evidence/` contains only the format
 example in this checkout.
 
-`make test-e2e` and `make test-cluster` are the acceptance targets of `test/e2e`
-and `test/cluster`. A checkout that does not contain those suites yet has no such
-target: the commands name the evidence, and the trees named are the ones that
-produce it.
+`make test-e2e` (`test/e2e`, envtest) and `make test-cluster` (`test/cluster`,
+kind) are the acceptance targets that exist in this checkout. Both skip — never
+pass — when their prerequisites are absent: the cluster suite's skip names the
+missing prerequisite and `VCR_CLUSTER_REQUIRED=1` turns it into a failure, while
+`make test-e2e` resolves the envtest assets itself so a run through the Makefile
+cannot skip for want of them. `docs/operations.md` ("Acceptance evidence") records
+what each one proves. Neither replaces `make test-spike`: both use test doubles for
+the frontend and the simulator, so neither establishes serving behavior.
 
 ## Explicit non-claims
 

@@ -136,19 +136,12 @@ func (s *suite) installOperator(t *testing.T) {
 		t.Fatalf("apply the operator installation: %v", err)
 	}
 
-	// Known product defect (reported, not fixed here): config/default/namespace.yaml
-	// labels the operator namespace
-	//   pod-security.kubernetes.io/enforce: baseline
-	// but the operator-managed device-plugin DaemonSet must mount
-	// /var/lib/kubelet/device-plugins as a hostPath, which baseline forbids. The
-	// DaemonSet is then rejected by Pod Security admission ("would violate
-	// PodSecurity baseline: hostPath volumes") and synthetic capacity never appears.
-	// The suite relabels the namespace the way the manifest must, so the rest of the
-	// run can be asserted; see test/cluster/README.md.
-	if _, err := s.kubectl("label", "namespace", operatorNamespace,
-		"pod-security.kubernetes.io/enforce=privileged", "--overwrite"); err != nil {
-		t.Fatalf("relabel the operator namespace for the hostPath device plugin: %v", err)
-	}
+	// The shipped namespace manifest carries the Pod Security label the device
+	// plugin needs (pod-security.kubernetes.io/enforce: privileged, because the
+	// plugin mounts /var/lib/kubelet/device-plugins as a hostPath). The suite
+	// installs it unchanged and asserts the resulting behaviour: the DaemonSet
+	// becomes Ready and synthetic capacity appears. `hack/verify-manifests.sh`
+	// fails if that label regresses.
 
 	if _, err := s.kubectl("wait", "--for=condition=Established", "--timeout=120s",
 		"crd/simulationenvironments.vcr.opendatahub-io"); err != nil {

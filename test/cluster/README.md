@@ -105,71 +105,33 @@ The directory is gitignored by `test/cluster/_artifacts/.gitignore`.
 
 ## Verified locally
 
-`kind-vcr-e2e` (kind v0.32.0, Kubernetes v1.36.1, rootless podman 5.8.9 as the kind
-provider), on this machine:
+`kind-vcr-e2e` (kind cluster from `hack/kind-up.sh`, rootless podman as the kind
+provider), on the machine the suite was developed on:
 
 ```
-$ go test -count=1 -timeout 30m -v ./test/cluster/
-...
---- PASS: TestClusterAcceptance (132.37s)
+$ hack/kind-up.sh && hack/images.sh --build --stub --load && make test-cluster
+ok  	github.com/opendatahub-io/vllm-vcr-operator/test/cluster	151.829s
+ok  	github.com/opendatahub-io/vllm-vcr-operator/test/cluster/certs	0.221s
 ```
 
-Three consecutive runs passed (132 s, 148 s, 152 s). They required the first known
-defect below to be fixed in the working tree. With the defect present the suite fails in
-the admission step after about three seconds, with the API server's own words — the
-correct outcome for a Pod the operator cannot produce:
+The run exercises the real path with no workaround: the shipped `config/default`
+(including its namespace Pod Security label) is applied unchanged, and the profile
+fixture runs the real `vcr-profile-export` binary with no wrapper. The suite asserts
+the provisioner init container completes, that the profile volume holds exactly
+`metadata.json` and the trace file, and that no staging directory is left behind.
 
-```
-the API server rejected the Pod the operator generated: Error creating: Pod
-"modelserver-admission-…" is invalid: [spec.containers[0].ports[2].name: Invalid
-value: "engine-handshake": must be no more than 15 characters,
-spec.containers[0].ports[3].name: Invalid value: "supervisor-health": must be no more
-than 15 characters]
-```
+## Defects this suite found, and where they were closed
 
-See "Known product defects".
+The suite is the acceptance interface, so it reported product defects instead of
+fixing them. All four are closed on the integration branch, and none is worked
+around here any more:
 
-## Known product defects found by this suite
-
-These are reported here rather than fixed: `test/cluster/**` and `test/images/**` are
-the suite's ownership boundary. Each is reproducible with `make test-cluster` on the
-cluster above.
-
-1. **Blocking: the injected Pod is invalid, so no workload can be admitted.**
-   `internal/translator/frontend.go` names a container port `engine-handshake` (16
-   characters) and `internal/runtime/runtime.go` names one `supervisor-health` (17).
-   Kubernetes requires container port names to be at most 15 characters
-   (`IANA_SVC_NAME`), so the API server rejects every Pod the webhook produces:
-   `spec.containers[0].ports[2].name: Invalid value: "engine-handshake": must be no
-   more than 15 characters`. The ReplicaSet records `FailedCreate`, no Pod ever exists,
-   and nothing downstream can run. Suggested fix (two renames, no behavior change):
-   `engine-handshake` → `engine-hs`, `supervisor-health` → `supervisor-hl`, with the
-   two unit-test expectations in `internal/runtime/mutate_test.go` and
-   `internal/translator/invocation_test.go` updated to match. The suite was verified
-   green with exactly that patch applied.
-2. **The operator namespace's Pod Security label rejects the device plugin.**
-   `config/default/namespace.yaml` sets `pod-security.kubernetes.io/enforce: baseline`,
-   but the operator-managed DaemonSet mounts `/var/lib/kubelet/device-plugins` as a
-   hostPath, which baseline forbids. The DaemonSet is then rejected
-   (`would violate PodSecurity "baseline:latest": hostPath volumes`) and no synthetic
-   capacity ever appears, so `SimulationEnvironment.status` never reports
-   `DevicePluginReady`. The suite relabels the namespace `privileged` after applying
-   `config/default`; the manifest should carry that label itself (the device plugin's
-   need is exactly the case baseline cannot express).
-3. **Provisioning cannot stage on a read-only root filesystem.**
-   `internal/runtime` runs the provisioner with `readOnlyRootFilesystem: true` and
-   mounts only `/var/run/vcr/profile`, while `cmd/profileexport` stages its output next
-   to the target (`/var/run/vcr`) and renames it into place. On a real kubelet the
-   provisioner therefore fails with `EROFS`/`permission denied` before serving starts.
-   The fixture profile image ships `/usr/local/bin/vcr-profile-export-volume`, which
-   runs the real exporter (its metadata and trace validation included) with a staging
-   directory inside the mounted volume. The product fix belongs in `internal/runtime`:
-   make the provisioner's staging parent writable (mount an emptyDir at
-   `/var/run/vcr`, or give the exporter a staging directory under the target).
-4. **Status update conflicts are not retried.** The reconciler logs
-   `update SimulationEnvironment default status: Operation cannot be fulfilled ... the
-   object has been modified` and relies on a full requeue with backoff. It recovers, but
-   a conflict on its own status write should be re-read and retried.
+| Defect | Closed by |
+| --- | --- |
+| The generated Pod was invalid: container port names longer than 15 characters (`engine-handshake`, `supervisor-health`) made the API server reject every admitted Pod | port renames in `internal/translator` and `internal/runtime` |
+| The operator namespace was labelled `pod-security.kubernetes.io/enforce: baseline`, which forbids the device plugin's `hostPath`, so no synthetic capacity was ever advertised | `config/default/namespace.yaml` labels the namespace `privileged`, with the reason recorded there, in `config/README.md`, and asserted by `hack/verify-manifests.sh` |
+| The provisioner could not stage under a read-only root filesystem (`EROFS` on `/var/run/vcr`), so the fixture shipped a wrapper that hid it | `cmd/profileexport` stages inside the target directory (the writable profile volume), publishes `metadata.json` last, and removes its staging directory on every path; the wrapper is gone |
+| Status update conflicts were handled by requeue instead of a retry | `internal/controller` retries the status write with `k8s.io/client-go/util/retry.RetryOnConflict` and a fresh `Get`, requeueing only when the retry budget is spent |
 
 ## Knowingly unprovable on this machine
 

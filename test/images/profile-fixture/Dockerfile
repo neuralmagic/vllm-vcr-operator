@@ -31,11 +31,11 @@ RUN GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
     go build -trimpath -o /out/vcr-profile-export ./cmd/profileexport
 
 FROM ${BASE_IMAGE}
+# The real exporter, installed at the path the fixture metadata declares in
+# provisioning.entrypoint. cmd/profileexport stages inside the target directory,
+# which is the only path the operator's provisioner can write to (it runs with a
+# read-only root filesystem and only the profile volume mounted).
 COPY --from=builder /out/vcr-profile-export /usr/local/bin/vcr-profile-export
-# Wrapper that keeps the exporter's validation but stages inside the mounted
-# profile volume. See the script and test/cluster/README.md ("Known product
-# defect") for why the operator's read-only-rootfs provisioner needs it.
-COPY test/images/profile-fixture/vcr-profile-export-volume /usr/local/bin/vcr-profile-export-volume
 COPY test/images/profile-fixture/profile/ /profile/
 # The operator runs the provisioner as a non-root user (internal/runtime), so the
 # image must not rely on being root.
