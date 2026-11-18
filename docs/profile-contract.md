@@ -206,14 +206,15 @@ spec:
       pullSecretName: profile-pull-credentials   # optional per-image override
 ```
 
-The contract, and therefore the operator's behavior:
+What the operator does with them:
 
 - the reconciler uses the credentials to read the image's metadata label; a
   registry or credential failure is reported as the `RegistryUnavailable`
   condition with the Secret **name**, never a value;
-- only the credentials the selected profile actually needs are made available to
-  the workload namespace, under names prefixed `vcr-profile-pull-`
-  (`names.PullSecretPrefix`);
+- what admission must make available to the workload namespace is exactly the
+  credentials the selected profile needs, under names prefixed
+  `vcr-profile-pull-` (`names.PullSecretPrefix`) — the admission contract's rule
+  (`docs/contracts/admission.md`); `make test-e2e` is the check that asserts it;
 - no Secret value appears in a Pod annotation, status field, event, log line, or
   error message.
 

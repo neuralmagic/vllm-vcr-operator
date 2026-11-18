@@ -160,11 +160,15 @@ func (s *Stack) LoadProfile() error {
 	if err != nil {
 		return err
 	}
+	// The harness owns the run's directories, not the environment: a profile
+	// image run has no VCR_PROFILE_DIR, so the exported directory and the
+	// readiness marker must survive settings resolution.
+	settings.ProfileDir = s.profileDir
 	settings.ReadyFile = s.settings.ReadyFile
 	s.settings = settings
 	s.metadata = metadata
 
-	if err := requireNonEmptyFile(settings.TracePath(), "exported trace the profile declares"); err != nil {
+	if err := requireNonEmptyFile(settings.HostTracePath(), "exported trace the profile declares"); err != nil {
 		return err
 	}
 

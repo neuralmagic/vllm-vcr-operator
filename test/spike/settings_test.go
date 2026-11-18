@@ -130,6 +130,9 @@ func TestFrontendCommandBindsTheHandshakeAndWaitsForAnExternalEngine(t *testing.
 	if !containsValue(frontend, spike.DefaultModel) {
 		t.Errorf("frontend does not serve the profile's model:\n%v", frontend)
 	}
+	if !slices.Contains(frontend, "--enable-prefix-caching") {
+		t.Errorf("frontend does not enable the profile's recorded prefix caching:\n%v", frontend)
+	}
 	for _, forbidden := range []string{"--tensor-parallel-size", "--gpu-memory-utilization", "--dtype", "--quantization", "--num-gpu-blocks-override"} {
 		if slices.Contains(frontend, forbidden) {
 			t.Errorf("frontend received accelerator flag %q, which the simulator advertises instead", forbidden)
@@ -144,6 +147,22 @@ func TestFrontendCommandBindsTheHandshakeAndWaitsForAnExternalEngine(t *testing.
 	}
 	if !containsPair(command, "--shutdown-timeout", "20s") {
 		t.Errorf("supervisor has no graceful shutdown budget:\n%v", command)
+	}
+}
+
+// TestFrontendCommandFollowsTheRecordedCacheMode asserts prefix caching is the
+// profile's recorded property: a workload cannot ask for the opposite mode, and
+// the harness must not either.
+func TestFrontendCommandFollowsTheRecordedCacheMode(t *testing.T) {
+	metadata := fixtureMetadata()
+	metadata.Cache.EnablePrefixCaching = false
+
+	settings, err := spike.DefaultSettings(fixtureEnvironment(), metadata)
+	if err != nil {
+		t.Fatalf("DefaultSettings: %v", err)
+	}
+	if slices.Contains(settings.FrontendCommand(), "--enable-prefix-caching") {
+		t.Errorf("frontend enables prefix caching although the profile records it disabled:\n%v", settings.FrontendCommand())
 	}
 }
 
@@ -176,8 +195,11 @@ func TestBackendCommandConnectsAndServesTheProfile(t *testing.T) {
 	if !containsPair(command, "--max-model-len", "32768") {
 		t.Errorf("simulator model length is not bounded by the profile:\n%v", command)
 	}
-	if !containsPair(command, "--latency-trace", "/tmp/vcr-spike/profile/trace.jsonl.gz") {
-		t.Errorf("simulator does not read the exported trace:\n%v", command)
+	if !containsPair(command, "--latency-trace", "/var/run/vcr/profile/trace.jsonl.gz") {
+		t.Errorf("simulator does not read the exported trace at the profile mount path:\n%v", command)
+	}
+	if !containsPair(command, "--max-num-batched-tokens", "8192") {
+		t.Errorf("simulator per-step budget does not come from the profile's coverage:\n%v", command)
 	}
 	if !containsPair(command, "--control-address", "tcp://0.0.0.0:8001") {
 		t.Errorf("simulator control API is not on the documented port:\n%v", command)
@@ -296,10 +318,31 @@ func TestBackendCommandReplaysRecordedTokensOnlyWhenTheProfileGrantsIt(t *testin
 		t.Fatalf("DefaultSettings: %v", err)
 	}
 	command := granted.BackendCommand()
-	if !containsPair(command, "--replay-tokens", "/tmp/vcr-spike/profile/trace.jsonl.gz") {
+	if !containsPair(command, "--replay-tokens", "/var/run/vcr/profile/trace.jsonl.gz") {
 		t.Errorf("simulator does not replay the profile's recorded tokens:\n%v", command)
 	}
 	if !containsPair(command, "--replay-match", "prefix") {
 		t.Errorf("simulator does not match live requests by block-hash prefix, the only mode that works for a live client:\n%v", command)
+	}
+}
+
+// TestTraceReferenceUsesTheContainerMountPath asserts the simulator is pointed at
+// the profile directory as the container sees it, not at the host directory the
+// harness exported into: the host path does not exist inside the container, and a
+// wrong path would make the simulator fail at startup for a reason that looks like
+// a broken profile.
+func TestTraceReferenceUsesTheContainerMountPath(t *testing.T) {
+	settings, err := spike.DefaultSettings(fixtureEnvironment(), fixtureMetadata())
+	if err != nil {
+		t.Fatalf("DefaultSettings: %v", err)
+	}
+	if got := settings.TracePath(); got != "/var/run/vcr/profile/trace.jsonl.gz" {
+		t.Errorf("TracePath = %q, want the mounted profile path", got)
+	}
+	if got := settings.HostTracePath(); got != "/tmp/vcr-spike/profile/trace.jsonl.gz" {
+		t.Errorf("HostTracePath = %q, want the exported directory the harness checks", got)
+	}
+	if !strings.Contains(strings.Join(settings.BackendCommand(), " "), settings.TracePath()) {
+		t.Errorf("the simulator invocation does not reference the container trace path: %v", settings.BackendCommand())
 	}
 }

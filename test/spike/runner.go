@@ -128,7 +128,12 @@ func (r Runner) Start(ctx context.Context, c Container) (*Handle, error) {
 		return nil, fmt.Errorf("spike: start container %q: %w", c.Name, err)
 	}
 
-	return &Handle{runner: r, name: c.Name, cmd: cmd, logPath: logPath, logFile: logFile}, nil
+	handle := &Handle{runner: r, name: c.Name, cmd: cmd, logPath: logPath, logFile: logFile}
+	// Reap exactly once, so repeated Wait calls observe the same exit code
+	// instead of racing for the process status.
+	handle.done = make(chan error, 1)
+	go func() { handle.done <- cmd.Wait() }()
+	return handle, nil
 }
 
 // Run starts c, waits for it to exit, and returns its exit code.
@@ -162,6 +167,10 @@ type Handle struct {
 
 	logPath string
 	logFile *os.File
+	done    chan error
+	waited  bool
+	code    int
+	waitErr error
 }
 
 // Name is the container name.
@@ -170,25 +179,30 @@ func (h *Handle) Name() string { return h.name }
 // LogPath is the file receiving the container's combined output.
 func (h *Handle) LogPath() string { return h.logPath }
 
-// Wait waits for the container to exit and returns its exit code.
+// Wait waits for the container to exit and returns its exit code. Repeated calls
+// report the same result.
 func (h *Handle) Wait(ctx context.Context) (int, error) {
-	if h.cmd == nil {
+	if h.cmd == nil || h.done == nil {
 		return -1, errors.New("spike: container handle has no process")
 	}
-	done := make(chan error, 1)
-	go func() { done <- h.cmd.Wait() }()
+	if h.waited {
+		return h.code, h.waitErr
+	}
 
 	select {
-	case err := <-done:
+	case err := <-h.done:
 		h.closeLog()
+		h.waited = true
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return exitErr.ExitCode(), nil
+		switch {
+		case errors.As(err, &exitErr):
+			h.code, h.waitErr = exitErr.ExitCode(), nil
+		case err != nil:
+			h.code, h.waitErr = -1, fmt.Errorf("spike: wait for container %q: %w", h.name, err)
+		default:
+			h.code = 0
 		}
-		if err != nil {
-			return -1, fmt.Errorf("spike: wait for container %q: %w", h.name, err)
-		}
-		return 0, nil
+		return h.code, h.waitErr
 	case <-ctx.Done():
 		return -1, fmt.Errorf("spike: container %q did not exit before the deadline: %w", h.name, ctx.Err())
 	}

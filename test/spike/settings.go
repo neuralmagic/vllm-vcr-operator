@@ -84,11 +84,24 @@ type Settings struct {
 	// TraceFile is the profile's recorded trace file name.
 	TraceFile string
 
+	// ConfigHash is the profile's recorded vLLM configuration fingerprint, when
+	// it records one. The simulator refuses to start if a trace's fingerprint
+	// disagrees, which is a stronger check than trusting the metadata.
+	ConfigHash string
+
+	// Seed is the simulator seed for random tokens.
+	Seed int
+
+	// PrefixCaching is the profile's recorded prefix-caching mode. It is a
+	// recorded property: the simulator's cache model is the recording.
+	PrefixCaching bool
+
 	// Profile-derived limits the simulator must advertise.
-	MaxModelLen    int64
-	TokensPerBlock int32
-	KVBlocks       int64
-	MaxNumSeqs     int64
+	MaxModelLen         int64
+	MaxNumBatchedTokens int64
+	TokensPerBlock      int32
+	KVBlocks            int64
+	MaxNumSeqs          int64
 
 	// EnableKVEvents makes the simulator publish live KV-cache events.
 	EnableKVEvents bool
@@ -132,6 +145,8 @@ func DefaultSettings(env Environment, metadata *profile.Metadata) (Settings, err
 		ShutdownTimeout:  DefaultShutdownTimeout,
 		BackendLossGrace: DefaultBackendLossGrace,
 		TraceFile:        metadata.Trace.File,
+		ConfigHash:       metadata.VLLM.ConfigHash,
+		PrefixCaching:    metadata.Cache.EnablePrefixCaching,
 		ContentReplay:    metadata.Capabilities.ContentReplay,
 		MaxModelLen:      metadata.Coverage.MaxModelLen.Max,
 		TokensPerBlock:   metadata.Cache.BlockSize,
@@ -143,6 +158,9 @@ func DefaultSettings(env Environment, metadata *profile.Metadata) (Settings, err
 	if metadata.Coverage.MaxNumSeqs != nil {
 		settings.MaxNumSeqs = metadata.Coverage.MaxNumSeqs.Max
 	}
+	if metadata.Coverage.MaxNumBatchedTokens != nil {
+		settings.MaxNumBatchedTokens = metadata.Coverage.MaxNumBatchedTokens.Max
+	}
 	if len(metadata.Provisioning.Entrypoint) > 0 {
 		settings.ProvisionerEntrypoint = metadata.Provisioning.Entrypoint
 	} else {
@@ -151,8 +169,15 @@ func DefaultSettings(env Environment, metadata *profile.Metadata) (Settings, err
 	return settings, nil
 }
 
-// TracePath is the exported trace file path the simulator replays.
+// TracePath is the exported trace file path as the containers see it: the
+// profile directory is mounted at names.ProfileMountPath, so the host path would
+// not exist inside the container.
 func (s Settings) TracePath() string {
+	return filepath.Join(names.ProfileMountPath, s.TraceFile)
+}
+
+// HostTracePath is the same trace file on the host, for the harness's own checks.
+func (s Settings) HostTracePath() string {
 	return filepath.Join(s.ProfileDir, s.TraceFile)
 }
 
@@ -185,7 +210,7 @@ func (s Settings) ReadinessURL() string {
 // engine is replaced, and the simulator advertises topology, cache capacity, and
 // precision through the ready response.
 func (s Settings) FrontendCommand() []string {
-	return []string{
+	command := []string{
 		names.SupervisorBinary,
 		"--handshake-address", s.HandshakeAddress,
 		"--ready-file", ContainerReadyFile,
@@ -201,8 +226,11 @@ func (s Settings) FrontendCommand() []string {
 		"--data-parallel-address", "127.0.0.1",
 		"--data-parallel-rpc-port", strconv.Itoa(names.HandshakePort),
 		"--max-model-len", strconv.FormatInt(s.MaxModelLen, 10),
-		"--enable-prefix-caching",
 	}
+	if s.PrefixCaching {
+		command = append(command, "--enable-prefix-caching")
+	}
+	return command
 }
 
 // BackendCommand is the simulator container's argument tail: `vllm-vcr play`
@@ -218,7 +246,14 @@ func (s Settings) BackendCommand() []string {
 		"--control-address", "tcp://0.0.0.0:" + strconv.Itoa(s.ControlPort),
 		"--latency-trace", s.TracePath(),
 		"--shutdown-timeout", strconv.Itoa(int(s.ShutdownTimeout.Seconds())),
+		"--seed", strconv.Itoa(s.Seed),
 		"--log-requests",
+	}
+	if s.MaxNumBatchedTokens > 0 {
+		command = append(command, "--max-num-batched-tokens", strconv.FormatInt(s.MaxNumBatchedTokens, 10))
+	}
+	if s.ConfigHash != "" {
+		command = append(command, "--expect-config-hash", s.ConfigHash)
 	}
 	if s.MaxNumSeqs > 0 {
 		command = append(command, "--max-num-seqs", strconv.FormatInt(s.MaxNumSeqs, 10))
