@@ -29,9 +29,10 @@ resource sizing, restart policy, and log stream are independent.
    completes. Readiness is served by the frontend's own `/health` endpoint on the
    inference port; the frontend does not report ready while the engine is absent.
 
-The frontend's `/v1/models` endpoint is used as the readiness probe for workload
-compatibility (llm-d discovery expects it), while engine registration gates the
-underlying health.
+The frontend keeps serving `/v1/models` on the inference port for llm-d discovery,
+but the Pod's own readiness probe is the supervisor's `/readyz` (see below): the
+inference endpoint alone cannot observe a lost simulator, so probing it would keep an
+engine-less server Ready.
 
 ## Supervision and failure propagation
 
@@ -84,6 +85,8 @@ evidence for this claim and records whichever behavior the pinned images exhibit
 | `VCR_READY_FILE` | File the supervisor writes once the engine is registered. |
 | `VLLM_*` | Preserved workload settings. GPU-only variables are removed or translated. |
 
-The supervisor writes `/tmp/vcr-runtime/ready` (or `VCR_READY_FILE`) and the
-frontend's liveness/readiness probes are configured by the operator against the
-inference port; the supervisor's readiness file is what incident diagnostics use.
+The supervisor writes `/tmp/vcr-runtime/ready` (or `VCR_READY_FILE`). The operator
+probes the frontend container through the supervisor: liveness is `GET /healthz` and
+readiness is `GET /readyz` on the supervisor's health port (`8082`), which the
+supervisor binds on every interface because kubelet probes the Pod's IP rather than
+its loopback. The ready file is what incident diagnostics use.
