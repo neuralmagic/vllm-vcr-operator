@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/controller"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
 )
@@ -89,9 +88,9 @@ func TestApplicablePodDeniedWithoutEnvironment(t *testing.T) {
 func TestApplicablePodDeniedWhenEnvironmentIsNotReady(t *testing.T) {
 	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
 		e.Status.Conditions = []metav1.Condition{{
-			Type:    controller.ConditionReady,
+			Type:    vcrv1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
-			Reason:  controller.ReasonDevicePluginNotReady,
+			Reason:  vcrv1alpha1.ReasonDevicePluginNotReady,
 			Message: "the synthetic device plugin is not ready on simulation nodes",
 		}}
 	})
@@ -496,10 +495,10 @@ func TestGPUOnlyInInitContainerDenied(t *testing.T) {
 	}
 }
 
-// TestUnrecognizedGPUInitContainerDeniedAsWorkloadProblem asserts a GPU-dependent
-// setup step the operator does not recognize is a workload problem, not an operator
-// problem.
-func TestUnrecognizedGPUInitContainerDeniedAsWorkloadProblem(t *testing.T) {
+// TestGPUInitContainerDeniedAsWorkloadProblem asserts a GPU-dependent setup step is
+// a workload problem, not an operator problem, and that the message names the
+// container: this release translates no GPU-requesting init container.
+func TestGPUInitContainerDeniedAsWorkloadProblem(t *testing.T) {
 	mutator := testMutator(t, testClient(t, testEnvironment(t)))
 	pod := testPod()
 	pod.Spec.InitContainers = []corev1.Container{{
@@ -516,7 +515,7 @@ func TestUnrecognizedGPUInitContainerDeniedAsWorkloadProblem(t *testing.T) {
 	resp := mutator.Admit(t.Context(), admissionRequest(t, admissionv1.Create, pod))
 
 	if resp.Allowed {
-		t.Fatal("Pod with an unrecognized GPU init container admitted")
+		t.Fatal("Pod with a GPU-requesting init container admitted")
 	}
 	message := messageOf(resp)
 	if strings.Contains(message, "operator problem") {

@@ -229,7 +229,9 @@ can be used.
 - **It cannot authorize an override it does not cover.** Coverage ranges are the
   only authorization; a missing range means the workload's value is rejected.
 - **It cannot make KV-event replay work.** The pinned simulator publishes live
-  events and reports `replay_endpoint: null`; a profile that declared
-  `kvEventReplay: true` would authorize a re-synchronization that does not exist.
+  events and reports `replay_endpoint: null`; an explicit `replay_endpoint` is
+  rejected outright for this release, and a profile that declared
+  `kvEventReplay: true` only satisfies the narrower gate that stays behind that
+  rejection.
 - **It cannot change the operator's vLLM release.** The release is fixed per
   operator build; a profile recorded against another release is rejected.

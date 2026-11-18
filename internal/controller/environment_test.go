@@ -174,26 +174,26 @@ func TestReconcilePublishesSupportedVersionAndConditions(t *testing.T) {
 		t.Errorf("status.observedGeneration = %d, want %d", got, env.Generation)
 	}
 
-	profiles := conditionOf(t, stored, controller.ConditionProfilesReconciled)
-	if profiles.Status != metav1.ConditionTrue || profiles.Reason != controller.ReasonAllProfilesUsable {
-		t.Errorf("ProfilesReconciled = %s/%s, want True/%s", profiles.Status, profiles.Reason, controller.ReasonAllProfilesUsable)
+	profiles := conditionOf(t, stored, vcrv1alpha1.ConditionProfilesReconciled)
+	if profiles.Status != metav1.ConditionTrue || profiles.Reason != vcrv1alpha1.ReasonAllProfilesUsable {
+		t.Errorf("ProfilesReconciled = %s/%s, want True/%s", profiles.Status, profiles.Reason, vcrv1alpha1.ReasonAllProfilesUsable)
 	}
 	if !strings.Contains(profiles.Message, "no profile") {
 		t.Errorf("ProfilesReconciled message = %q, want it to explain that no profile image is configured", profiles.Message)
 	}
 
-	devicePlugin := conditionOf(t, stored, controller.ConditionDevicePluginReady)
-	if devicePlugin.Status != metav1.ConditionFalse || devicePlugin.Reason != controller.ReasonDaemonSetNotReady {
+	devicePlugin := conditionOf(t, stored, vcrv1alpha1.ConditionDevicePluginReady)
+	if devicePlugin.Status != metav1.ConditionFalse || devicePlugin.Reason != vcrv1alpha1.ReasonDaemonSetNotReady {
 		t.Errorf("DevicePluginReady = %s/%s, want False/%s before kubelet reports the DaemonSet",
-			devicePlugin.Status, devicePlugin.Reason, controller.ReasonDaemonSetNotReady)
+			devicePlugin.Status, devicePlugin.Reason, vcrv1alpha1.ReasonDaemonSetNotReady)
 	}
 	if !strings.Contains(devicePlugin.Message, "0 of 0") {
 		t.Errorf("DevicePluginReady message = %q, want the desired and ready node counts", devicePlugin.Message)
 	}
 
-	ready := conditionOf(t, stored, controller.ConditionReady)
-	if ready.Status != metav1.ConditionFalse || ready.Reason != controller.ReasonDevicePluginNotReady {
-		t.Errorf("Ready = %s/%s, want False/%s", ready.Status, ready.Reason, controller.ReasonDevicePluginNotReady)
+	ready := conditionOf(t, stored, vcrv1alpha1.ConditionReady)
+	if ready.Status != metav1.ConditionFalse || ready.Reason != vcrv1alpha1.ReasonDevicePluginNotReady {
+		t.Errorf("Ready = %s/%s, want False/%s", ready.Status, ready.Reason, vcrv1alpha1.ReasonDevicePluginNotReady)
 	}
 	if result.RequeueAfter != 0 {
 		t.Errorf("RequeueAfter = %s, want no requeue once profiles are reconciled", result.RequeueAfter)
@@ -202,14 +202,14 @@ func TestReconcilePublishesSupportedVersionAndConditions(t *testing.T) {
 	makeDevicePluginReady(t, c, 2)
 	stored, _ = reconcile(t, reconciler, c)
 
-	devicePlugin = conditionOf(t, stored, controller.ConditionDevicePluginReady)
-	if devicePlugin.Status != metav1.ConditionTrue || devicePlugin.Reason != controller.ReasonDaemonSetReady {
+	devicePlugin = conditionOf(t, stored, vcrv1alpha1.ConditionDevicePluginReady)
+	if devicePlugin.Status != metav1.ConditionTrue || devicePlugin.Reason != vcrv1alpha1.ReasonDaemonSetReady {
 		t.Errorf("DevicePluginReady = %s/%s, want True/%s once every node runs the plugin",
-			devicePlugin.Status, devicePlugin.Reason, controller.ReasonDaemonSetReady)
+			devicePlugin.Status, devicePlugin.Reason, vcrv1alpha1.ReasonDaemonSetReady)
 	}
-	ready = conditionOf(t, stored, controller.ConditionReady)
-	if ready.Status != metav1.ConditionTrue || ready.Reason != controller.ReasonEnvironmentReady {
-		t.Errorf("Ready = %s/%s, want True/%s", ready.Status, ready.Reason, controller.ReasonEnvironmentReady)
+	ready = conditionOf(t, stored, vcrv1alpha1.ConditionReady)
+	if ready.Status != metav1.ConditionTrue || ready.Reason != vcrv1alpha1.ReasonEnvironmentReady {
+		t.Errorf("Ready = %s/%s, want True/%s", ready.Status, ready.Reason, vcrv1alpha1.ReasonEnvironmentReady)
 	}
 }
 
@@ -266,7 +266,7 @@ func TestReconcilePublishesResolvedProfiles(t *testing.T) {
 		t.Errorf("reconciledAt = %s, want %s", profile.ReconciledAt.Time, fixedTime)
 	}
 
-	profiles := conditionOf(t, stored, controller.ConditionProfilesReconciled)
+	profiles := conditionOf(t, stored, vcrv1alpha1.ConditionProfilesReconciled)
 	if profiles.Status != metav1.ConditionTrue {
 		t.Errorf("ProfilesReconciled = %s (%s: %s), want True", profiles.Status, profiles.Reason, profiles.Message)
 	}
@@ -306,16 +306,16 @@ func TestReconcileKeepsUsableProfilesWhenOneIsUnusable(t *testing.T) {
 		t.Errorf("unusable profile published unvalidated metadata %q", unusable.Metadata)
 	}
 
-	profiles := conditionOf(t, stored, controller.ConditionProfilesReconciled)
-	if profiles.Status != metav1.ConditionFalse || profiles.Reason != controller.ReasonProfileUnusable {
-		t.Errorf("ProfilesReconciled = %s/%s, want False/%s", profiles.Status, profiles.Reason, controller.ReasonProfileUnusable)
+	profiles := conditionOf(t, stored, vcrv1alpha1.ConditionProfilesReconciled)
+	if profiles.Status != metav1.ConditionFalse || profiles.Reason != vcrv1alpha1.ReasonProfileUnusable {
+		t.Errorf("ProfilesReconciled = %s/%s, want False/%s", profiles.Status, profiles.Reason, vcrv1alpha1.ReasonProfileUnusable)
 	}
 	if !strings.Contains(profiles.Message, bad) {
 		t.Errorf("ProfilesReconciled message %q does not name the unusable image %q", profiles.Message, bad)
 	}
-	if ready := conditionOf(t, stored, controller.ConditionReady); ready.Status != metav1.ConditionFalse ||
-		ready.Reason != controller.ReasonProfilesNotReconciled {
-		t.Errorf("Ready = %s/%s, want False/%s", ready.Status, ready.Reason, controller.ReasonProfilesNotReconciled)
+	if ready := conditionOf(t, stored, vcrv1alpha1.ConditionReady); ready.Status != metav1.ConditionFalse ||
+		ready.Reason != vcrv1alpha1.ReasonProfilesNotReconciled {
+		t.Errorf("Ready = %s/%s, want False/%s", ready.Status, ready.Reason, vcrv1alpha1.ReasonProfilesNotReconciled)
 	}
 	if result.RequeueAfter != 0 {
 		t.Errorf("RequeueAfter = %s, want no requeue for a metadata contract violation that only a spec change can fix", result.RequeueAfter)
@@ -345,9 +345,9 @@ func TestReconcileRequeuesOnRegistryFailure(t *testing.T) {
 	if len(stored.Status.Profiles) != 1 || stored.Status.Profiles[0].Message == "" {
 		t.Fatalf("status.profiles = %+v, want the failed image published with a message", stored.Status.Profiles)
 	}
-	profiles := conditionOf(t, stored, controller.ConditionProfilesReconciled)
-	if profiles.Status != metav1.ConditionFalse || profiles.Reason != controller.ReasonRegistryUnavailable {
-		t.Errorf("ProfilesReconciled = %s/%s, want False/%s", profiles.Status, profiles.Reason, controller.ReasonRegistryUnavailable)
+	profiles := conditionOf(t, stored, vcrv1alpha1.ConditionProfilesReconciled)
+	if profiles.Status != metav1.ConditionFalse || profiles.Reason != vcrv1alpha1.ReasonRegistryUnavailable {
+		t.Errorf("ProfilesReconciled = %s/%s, want False/%s", profiles.Status, profiles.Reason, vcrv1alpha1.ReasonRegistryUnavailable)
 	}
 	if result.RequeueAfter != 30*time.Second {
 		t.Errorf("RequeueAfter = %s, want the configured 30s retry for a transient registry failure", result.RequeueAfter)
@@ -401,14 +401,14 @@ func TestReconcileReportsACatalogConflict(t *testing.T) {
 
 	stored, _ := reconcile(t, reconciler, c)
 
-	profiles := conditionOf(t, stored, controller.ConditionProfilesReconciled)
+	profiles := conditionOf(t, stored, vcrv1alpha1.ConditionProfilesReconciled)
 	if profiles.Status != metav1.ConditionFalse {
 		t.Fatalf("ProfilesReconciled = %s, want False for two digests of one profile id", profiles.Status)
 	}
 	if !strings.Contains(profiles.Message, "same-profile-id") {
 		t.Errorf("ProfilesReconciled message %q does not name the conflicting profile id", profiles.Message)
 	}
-	if ready := conditionOf(t, stored, controller.ConditionReady); ready.Status != metav1.ConditionFalse {
+	if ready := conditionOf(t, stored, vcrv1alpha1.ConditionReady); ready.Status != metav1.ConditionFalse {
 		t.Errorf("Ready = %s, want False while the profile catalog is ambiguous", ready.Status)
 	}
 }
@@ -756,7 +756,7 @@ func TestReconcileRetriesAConflictingStatusUpdate(t *testing.T) {
 	if metadata := stored.Status.Profiles[0].Metadata; !strings.Contains(metadata, `"profile-a"`) {
 		t.Errorf("status.profiles[0].metadata = %q, want the resolved profile-a document", metadata)
 	}
-	if condition := conditionOf(t, stored, controller.ConditionProfilesReconciled); condition.Status != metav1.ConditionTrue {
+	if condition := conditionOf(t, stored, vcrv1alpha1.ConditionProfilesReconciled); condition.Status != metav1.ConditionTrue {
 		t.Errorf("ProfilesReconciled = %s, want True after the retried write", condition.Status)
 	}
 }

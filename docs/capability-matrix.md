@@ -64,13 +64,14 @@ obvious.
 | Prefix caching | translated, unverified | Require-profile: the workload's mode must equal `cache.enablePrefixCaching` |
 | KV block size (`--block-size`) | translated, unverified | Becomes `--tokens-per-block` and must equal `cache.blockSize`; llm-d's `tokenProcessorConfig.blockSize` must agree, or prefix matches silently stop |
 | Chunked prefill (`--enable-chunked-prefill`, `--long-prefill-token-threshold`) | translated, unverified | Must be consistent with the recording; a change against the recording is rejected |
-| Maximum model length | translated, unverified | Bounded by `coverage.maxModelLen`; a profile without a bound is refused rather than given an invented limit |
+| Maximum model length | translated, unverified | Bounded by `coverage.maxModelLen` and passed to **both** the frontend (`--max-model-len`) and the simulator; a lower cap inside coverage is accepted, an increase is rejected, and a profile without a bound is refused rather than given an invented limit |
 | Maximum running sequences / per-step token budget | translated, unverified | Within `coverage.maxNumSeqs` / `coverage.maxNumBatchedTokens` |
 | Scheduling policy (`fcfs`, `priority`) | translated, unverified | Any other policy is rejected |
 | KV capacity from a block override (`--num-gpu-blocks-override`) | translated, unverified | Within `coverage.kvBlocks` |
-| KV capacity from a memory fraction or byte budget (`--gpu-memory-utilization`, `--kv-cache-memory-bytes`) | gated (`coverage.kvMemoryConversion`) | Capacity is never inferred from a percentage alone; the simulated capacity is the profile's recorded `cache.kvBlocks` |
+| KV capacity from a memory fraction (`--gpu-memory-utilization`) | gated (`coverage.kvMemoryConversion`) | Capacity is never inferred from a percentage alone; the simulated capacity is the profile's recorded `cache.kvBlocks`, which the plan's warnings state |
+| KV capacity from a byte budget (`--kv-cache-memory-bytes`) | rejected | This release has no validated bytes → blocks conversion, so the budget could not change the simulated cache; `--num-gpu-blocks-override` inside `coverage.kvBlocks` is the supported explicit selection |
 | KV live events (`--kv-events-config`) | translated, unverified | Requires `trace.kvEvents`; the topic defaults to the llm-d form `kv@<pod identity>@<model>`; publisher tuning fields (`buffer_steps`, `hwm`, `max_queue_size`) are rejected |
-| **KV event replay** | **rejected** | The simulator's ready response always reports `replay_endpoint: null` and it has no replay responder. An explicit `replay_endpoint` is rejected unless a profile grants `capabilities.kvEventReplay`, and no reconcilable profile for this release should. The operator never ignores the setting |
+| **KV event replay** | **rejected** | The pinned simulator's ready response always reports `replay_endpoint: null` and it has no replay responder. An explicit `replay_endpoint` is rejected unconditionally for this release, with a message naming the pin (`v0.2.5`); the `capabilities.kvEventReplay` gate stays behind it for a future re-pin, and no reconcilable profile grants it. The operator never ignores the setting |
 | Sleep mode (`--enable-sleep-mode`) | rejected | Not implemented by the simulated engine |
 | Async scheduling, custom scheduler classes, active-sequence caps | rejected | Not implemented by the simulated engine |
 
@@ -80,6 +81,7 @@ obvious.
 | --- | --- | --- |
 | Tensor parallel size, dtype, quantization | gated (`require-profile`) | Must equal the recorded topology and precision; no GPU computation runs |
 | GPU request quantity | translated, unverified | Preserved verbatim on the workload's container; the profile's `gpu.count` must match |
+| GPU-requesting init containers | rejected | A GPU-dependent setup step cannot be translated as a whole, so every init container that requests or limits `nvidia.com/gpu` is refused by name. Init containers without a device request are preserved |
 | Pipeline parallelism > 1 | rejected | A validated translation does not exist |
 | Data parallelism, distributed workers, multi-node ranks, remote engine addresses | rejected | One Pod runs one simulated model server |
 | P/D roles and KV-transfer connectors (`--kv-transfer-config`) | gated (`capabilities.disaggregatedPrefill`) | Rejected for every profile that does not grant it |

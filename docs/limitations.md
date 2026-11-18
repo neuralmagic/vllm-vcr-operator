@@ -38,10 +38,12 @@ subscription, a dropped connection — cannot re-synchronize its prefix index fr
 the engine. Only newly stored blocks are seen.
 
 What the operator does about it: an explicit `replay_endpoint` in a workload's
-`--kv-events-config` is **rejected** unless the selected profile's
-`capabilities.kvEventReplay` is true, and even then the plan records that
-re-synchronization cannot happen. Reconciliable profiles for this release declare
-`false`.
+`--kv-events-config` is **rejected unconditionally**, and the rejection names the
+pinned simulator release (`names.SupportedSimulatorTag`, `v0.2.5`). The profile
+capability check (`capabilities.kvEventReplay`) remains as a second, narrower gate
+behind it, so re-pinning a simulator that implements replay relaxes one decision
+instead of quietly promising a behavior the pinned build lacks. No reconcilable
+profile for this release grants the capability.
 
 Consequence for tests: reconnect/recovery acceptance for prefix-cache routing
 cannot be claimed. Live-event routing tests alone do not establish it.
@@ -54,11 +56,27 @@ assert logprob values.
 
 ### GPU memory fractions need a validated conversion
 
-`--gpu-memory-utilization` and `--kv-cache-memory-bytes` are accepted only for a
-profile that declares `coverage.kvMemoryConversion`. Even then, the metadata
-records only the resulting `cache.kvBlocks`, so the simulated capacity is the
-recorded value, not a function of the requested number. A profile without that
-declaration rejects both settings: capacity is never inferred from a percentage.
+`--gpu-memory-utilization` is accepted only for a profile that declares
+`coverage.kvMemoryConversion`, and the plan records a warning that the simulated
+capacity is the profile's recorded `cache.kvBlocks` rather than a function of the
+requested fraction: the metadata records only the resulting block count. A profile
+without that declaration rejects the setting.
+
+`--kv-cache-memory-bytes` is **rejected** even with that declaration. This release
+has no validated bytes → blocks conversion, so accepting the byte budget would
+change nothing while looking as if it had; the profile's recorded `cache.kvBlocks`
+is the only simulated capacity. Use `--num-gpu-blocks-override` (within
+`coverage.kvBlocks`) to select a capacity explicitly.
+
+### GPU-requesting init containers are not translated
+
+An init container that requests or limits `nvidia.com/gpu` is rejected by name.
+The operator replaces the GPU engine with a simulator, and an init container that
+asks for a device would either hold the allocation the workload container must own
+or run accelerator code where no accelerator exists. Guessing from a container's
+name or command that a GPU-requesting setup step is really GPU-free is exactly the
+approximation the settings policy refuses. Setup steps that request no device are
+preserved unchanged.
 
 ### Booleans resolve only in their affirmative spelling
 
@@ -74,6 +92,32 @@ Both replay modes fall back to the simulator's seeded random tokens for requests
 the trace cannot match, and report no error. A content assertion cannot tell a
 replay hit from a fallback by looking at the response. `--stats` counters are the
 only witness, and they are the simulator's, not the frontend's.
+
+## Admission side effects
+
+Admission writes exactly one kind of resource: the operator-managed
+`imagePullSecret` copy in the workload namespace. Everything else it does is a
+patch to the Pod being created.
+
+This is a documented reconciliation with the specification's statement that
+admission "does not download profile images or create helper resources during
+admission", not an exception taken quietly:
+
+- the copy is the only mechanism Kubernetes offers to make an operator-namespace
+  pull credential usable by a Pod in another namespace, and the specification
+  separately requires operator-managed credential provisioning for workload
+  namespaces;
+- it is only credentials that can apply: a profile-level `pullSecretName` is
+  projected as configured, an environment-wide entry only when its docker config
+  covers the selected image's registry host, and nothing at all when no entry
+  does (the pull then proceeds anonymously);
+- a dry-run request writes nothing;
+- admission never pulls or reads a profile image, never contacts a registry,
+  never reconciles profile metadata, and never creates or changes a workload
+  resource.
+
+`docs/contracts/admission.md` ("Admission side effects") is the binding form of
+this boundary.
 
 ## Unverified in this checkout
 

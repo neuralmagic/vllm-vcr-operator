@@ -120,66 +120,6 @@ type Request struct {
 	PodIdentity string
 }
 
-// Rejection is one reason a workload cannot be admitted.
-//
-// Invariant: Reason never contains a credential. Settings whose value is secret
-// are reported by name only.
-type Rejection struct {
-	// Setting names the offending setting, for example
-	// "--pipeline-parallel-size" or "VLLM_DP_RANK". It may also name a synthetic
-	// requirement, for example "nvidia.com/gpu".
-	Setting string
-	// Reason explains why the setting cannot be served.
-	Reason string
-}
-
-// Error implements error.
-func (r Rejection) Error() string {
-	if r.Setting == "" {
-		return "translator: " + r.Reason
-	}
-	return fmt.Sprintf("translator: %s: %s", r.Setting, r.Reason)
-}
-
-// Rejections is a non-empty set of independent admission rejections. Translate
-// reports every problem it can establish, so one rejection explains the whole
-// configuration.
-type Rejections []Rejection
-
-// Error implements error.
-func (rs Rejections) Error() string {
-	parts := make([]string, len(rs))
-	for i, r := range rs {
-		parts[i] = r.Error()
-	}
-	return strings.Join(parts, "; ")
-}
-
-// Unwrap exposes the individual rejections to errors.Is/As.
-func (rs Rejections) Unwrap() []error {
-	out := make([]error, len(rs))
-	for i, r := range rs {
-		out[i] = r
-	}
-	return out
-}
-
-// Rejected reports whether err carries structured rejections and returns them.
-func Rejected(err error) (Rejections, bool) {
-	if err == nil {
-		return nil, false
-	}
-	var rs Rejections
-	if errors.As(err, &rs) {
-		return rs, len(rs) > 0
-	}
-	var r Rejection
-	if errors.As(err, &r) {
-		return Rejections{r}, true
-	}
-	return nil, false
-}
-
 // Translate applies the settings policy to one workload and returns the admission
 // plan, or the reasons the workload cannot be simulated.
 //
@@ -250,6 +190,7 @@ func Translate(req Request) (*plan.Admission, error) {
 		return nil, err
 	}
 
+	pullSecrets, profilePullSecret := pullSecretsFor(env, selection.Image)
 	admission := &plan.Admission{
 		Profile: plan.Profile{ID: selection.ID, Image: selection.Image, Digest: selection.Digest},
 		Model: plan.Model{
@@ -257,13 +198,14 @@ func Translate(req Request) (*plan.Admission, error) {
 			Revision:    resolvedRevision(cfg, metadata),
 			ServedNames: append([]string(nil), cfg.Model.ServedModelNames...),
 		},
-		GPUDevices:  req.GPUDevices,
-		Frontend:    frontend,
-		Backend:     backend,
-		Provisioner: provisioner,
-		Resources:   env.Sizing,
-		Placement:   placementFor(env),
-		PullSecrets: pullSecretsFor(env, selection.Image),
+		GPUDevices:        req.GPUDevices,
+		Frontend:          frontend,
+		Backend:           backend,
+		Provisioner:       provisioner,
+		Resources:         env.Sizing,
+		Placement:         placementFor(env),
+		PullSecrets:       pullSecrets,
+		ProfilePullSecret: profilePullSecret,
 		Provenance: plan.Provenance{
 			ProfileID:    selection.ID,
 			ProfileImage: plan.Profile{Image: selection.Image, Digest: selection.Digest}.PinnedImage(),

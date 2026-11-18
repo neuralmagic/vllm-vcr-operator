@@ -115,4 +115,14 @@ const (
 	// SupportedVLLMVersion is the vLLM release this operator build translates
 	// against. Fixed per operator release.
 	SupportedVLLMVersion = "0.33.0"
+
+	// SupportedSimulatorTag is the release tag of the pinned vllm-vcr simulator
+	// build this operator emits `play` arguments for. It is recorded in
+	// hack/vllm-vcr-pin.env (VLLM_VCR_PIN_TAG) and enforced by
+	// hack/check-vllm-vcr-upstream.sh plus a unit test, so the two cannot drift.
+	//
+	// Rejections that exist only because the pinned build lacks a feature name
+	// this tag: re-pinning the simulator is then the single place that relaxes
+	// them.
+	SupportedSimulatorTag = "v0.2.5"
 )

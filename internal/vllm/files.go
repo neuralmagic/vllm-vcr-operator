@@ -43,7 +43,7 @@ func (r *fileResolver) read(containerPath string, setting Setting) ([]byte, *Rej
 	}
 	if !ok {
 		return nil, &Rejection{
-			Setting: setting,
+			Setting: string(setting),
 			Value:   containerPath,
 			Reason:  "the file is not backed by a volume mount in the Pod spec, so its content is not resolvable",
 		}
@@ -51,13 +51,13 @@ func (r *fileResolver) read(containerPath string, setting Setting) ([]byte, *Rej
 	volume, ok := r.volumes[mount.Name]
 	if !ok {
 		return nil, &Rejection{
-			Setting: setting,
+			Setting: string(setting),
 			Value:   containerPath,
 			Reason:  fmt.Sprintf("volume %q is mounted but not defined in the Pod spec", mount.Name),
 		}
 	}
 	return nil, &Rejection{
-		Setting: setting,
+		Setting: string(setting),
 		Value:   containerPath,
 		Reason:  fmt.Sprintf("%s content is not available to admission, so the value cannot be resolved", volumeSourceKind(volume)),
 	}

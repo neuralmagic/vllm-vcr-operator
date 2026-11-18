@@ -40,7 +40,7 @@ func requireRejection(t *testing.T, err error, setting vllm.Setting, want string
 		t.Fatalf("Resolve() error is not a structured rejection: %v", err)
 	}
 	for _, r := range rs {
-		if r.Setting == setting && strings.Contains(r.Reason, want) {
+		if r.Setting == string(setting) && strings.Contains(r.Reason, want) {
 			return r
 		}
 	}

@@ -69,7 +69,7 @@ func Resolve(in Invocation) (*Config, error) {
 func (p *parser) applyConfigFileLayer(rawPath string) {
 	containerPath, rej := p.resolvePath(rawPath)
 	if rej != nil {
-		rej.Setting = SettingConfigFile
+		rej.Setting = string(SettingConfigFile)
 		p.errs = append(p.errs, *rej)
 		return
 	}
@@ -92,7 +92,7 @@ func requireModel(cfg *Config) *Rejection {
 		return nil
 	}
 	return &Rejection{
-		Setting: SettingModel,
+		Setting: string(SettingModel),
 		Reason:  "the invocation does not specify a model, so no profile can be selected; pass it as `vllm serve <model>` or with --model",
 	}
 }

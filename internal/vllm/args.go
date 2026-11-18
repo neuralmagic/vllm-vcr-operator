@@ -103,7 +103,7 @@ func (p *parser) applyTokens(tokens []string) {
 		name = normalizeFlagName(name)
 		if name == string(SettingConfigFile) {
 			p.errs = append(p.errs, Rejection{
-				Setting: SettingConfigFile,
+				Setting: string(SettingConfigFile),
 				Value:   inlineValue,
 				Reason:  "a config file cannot itself name another config file",
 			})
@@ -121,7 +121,7 @@ func (p *parser) applyTokens(tokens []string) {
 		if spec.kind == kindBool {
 			if hasInline {
 				p.errs = append(p.errs, Rejection{
-					Setting: spelling.setting,
+					Setting: string(spelling.setting),
 					Value:   inlineValue,
 					Reason:  "boolean flags take no value in vLLM 0.33.0",
 				})
@@ -137,7 +137,7 @@ func (p *parser) applyTokens(tokens []string) {
 		if !hasInline {
 			if i+1 >= len(tokens) {
 				p.errs = append(p.errs, Rejection{
-					Setting: spelling.setting,
+					Setting: string(spelling.setting),
 					Reason:  "the flag requires a value",
 				})
 				p.aborted = true
@@ -198,7 +198,7 @@ func (p *parser) resolvePositionalModel() {
 	}
 	if len(p.positionals) > 1 {
 		p.errs = append(p.errs, Rejection{
-			Setting: SettingModelTag,
+			Setting: string(SettingModelTag),
 			Value:   strings.Join(p.positionals, " "),
 			Reason:  "unexpected positional arguments; vllm serve takes exactly one model argument",
 		})
@@ -271,7 +271,7 @@ func (p *parser) expandDottedJSON(tokens []string) ([]string, bool) {
 		name = normalizeFlagName(name)
 		flagName, keyPath, _ := strings.Cut(name, ".")
 		if keyPath == "" {
-			return fail(Rejection{Setting: Setting(flagName), Value: token, Reason: "empty JSON key in a JSON CLI argument"})
+			return fail(Rejection{Setting: string(Setting(flagName)), Value: token, Reason: "empty JSON key in a JSON CLI argument"})
 		}
 		spelling, ok := p.specs[flagName]
 		if !ok {
@@ -279,7 +279,7 @@ func (p *parser) expandDottedJSON(tokens []string) ([]string, bool) {
 		}
 		if !spelling.spec.takesJSONObject() {
 			return fail(Rejection{
-				Setting: spelling.setting,
+				Setting: string(spelling.setting),
 				Value:   keyPath,
 				Reason:  "this flag is not a JSON object, so it has no sub-keys",
 			})
@@ -287,7 +287,7 @@ func (p *parser) expandDottedJSON(tokens []string) ([]string, bool) {
 		value := inlineValue
 		if !hasInline {
 			if i+1 >= len(tokens) {
-				return fail(Rejection{Setting: spelling.setting, Reason: "the JSON key requires a value"})
+				return fail(Rejection{Setting: string(spelling.setting), Reason: "the JSON key requires a value"})
 			}
 			i++
 			value = tokens[i]
@@ -319,7 +319,7 @@ func (p *parser) expandDottedJSON(tokens []string) ([]string, bool) {
 	for _, m := range order {
 		raw, err := encodeJSONObject(m.value)
 		if err != nil {
-			return fail(Rejection{Setting: Setting(m.flag), Value: "", Reason: "the JSON CLI arguments could not be encoded"})
+			return fail(Rejection{Setting: string(Setting(m.flag)), Value: "", Reason: "the JSON CLI arguments could not be encoded"})
 		}
 		out = append(out, m.flag, raw)
 	}
@@ -367,7 +367,7 @@ func resolveConfigPathArg(tokens []string) (string, bool, *Rejection) {
 			return inlineValue, true, nil
 		}
 		if i+1 >= len(tokens) {
-			return "", false, &Rejection{Setting: SettingConfigFile, Reason: "the flag requires a value"}
+			return "", false, &Rejection{Setting: string(SettingConfigFile), Reason: "the flag requires a value"}
 		}
 		return tokens[i+1], true, nil
 	}
@@ -414,13 +414,13 @@ func unmodelledFlagRejection(name, value string) Rejection {
 	}
 	if knownFlag(name) {
 		return Rejection{
-			Setting: Setting(name),
+			Setting: string(Setting(name)),
 			Value:   value,
 			Reason:  "a vLLM 0.33.0 flag that this operator does not model, so its policy treatment is undefined",
 		}
 	}
 	return Rejection{
-		Setting: Setting(name),
+		Setting: string(Setting(name)),
 		Value:   value,
 		Reason:  "unknown flag; it is not part of the vLLM 0.33.0 command line",
 	}
@@ -469,7 +469,7 @@ func (p *parser) negatedSpelling(setting string) (string, bool) {
 func (p *parser) encodeConfigFile(content []byte) ([]string, *Rejection) {
 	values, err := decodeYAMLMapping(content)
 	if err != nil {
-		return nil, &Rejection{Setting: SettingConfigFile, Reason: err.Error()}
+		return nil, &Rejection{Setting: string(SettingConfigFile), Reason: err.Error()}
 	}
 	tokens := make([]string, 0, 2*len(values))
 	for _, entry := range values {
@@ -486,7 +486,7 @@ func (p *parser) encodeConfigFile(content []byte) ([]string, *Rejection) {
 			negated, ok := p.negatedSpelling("--" + key)
 			if !ok {
 				return nil, &Rejection{
-					Setting: SettingConfigFile,
+					Setting: string(SettingConfigFile),
 					Value:   entry.key,
 					Reason:  "a false value is expressed by the setting's negated spelling, and vLLM 0.33.0 registers none for this key",
 				}
@@ -497,22 +497,22 @@ func (p *parser) encodeConfigFile(content []byte) ([]string, *Rejection) {
 			for _, item := range value {
 				s, err := scalarToken(item)
 				if err != nil {
-					return nil, &Rejection{Setting: SettingConfigFile, Value: key, Reason: err.Error()}
+					return nil, &Rejection{Setting: string(SettingConfigFile), Value: key, Reason: err.Error()}
 				}
 				tokens = append(tokens, s)
 			}
 		case map[string]any:
 			raw, err := encodeJSONObject(JSONMap(value))
 			if err != nil {
-				return nil, &Rejection{Setting: SettingConfigFile, Value: key, Reason: "value cannot be encoded as JSON"}
+				return nil, &Rejection{Setting: string(SettingConfigFile), Value: key, Reason: "value cannot be encoded as JSON"}
 			}
 			tokens = append(tokens, "--"+key, raw)
 		case nil:
-			return nil, &Rejection{Setting: SettingConfigFile, Value: key, Reason: "null values are not resolvable"}
+			return nil, &Rejection{Setting: string(SettingConfigFile), Value: key, Reason: "null values are not resolvable"}
 		default:
 			s, err := scalarToken(value)
 			if err != nil {
-				return nil, &Rejection{Setting: SettingConfigFile, Value: key, Reason: err.Error()}
+				return nil, &Rejection{Setting: string(SettingConfigFile), Value: key, Reason: err.Error()}
 			}
 			tokens = append(tokens, "--"+key, s)
 		}

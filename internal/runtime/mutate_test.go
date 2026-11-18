@@ -652,29 +652,71 @@ func TestMutateRejectsUnsupportedPods(t *testing.T) {
 	})
 }
 
-// TestMutatePreservesRecognizedWeightDownloaderInitContainer asserts a GPU-dependent
-// artifact fetcher is kept, never silently dropped.
-func TestMutatePreservesRecognizedWeightDownloaderInitContainer(t *testing.T) {
+// TestMutateRejectsGPUInitContainers asserts every init container that asks for the
+// synthetic device is refused by name. A name or command that looks like a
+// downloader is not evidence that the step is GPU-free, and admitting it would put
+// a second GPU consumer in a Pod whose allocation must belong to exactly one
+// container.
+func TestMutateRejectsGPUInitContainers(t *testing.T) {
+	tests := []struct {
+		name      string
+		container corev1.Container
+	}{
+		{name: "name looks like a downloader", container: corev1.Container{
+			Name:    "model-download",
+			Image:   "python:3.12-slim",
+			Command: []string{"huggingface-cli", "download", "Qwen/Qwen3-0.6B"},
+		}},
+		{name: "command looks like a downloader", container: corev1.Container{
+			Name:    "setup",
+			Image:   "python:3.12-slim",
+			Command: []string{"wget", "https://example.com/weights"},
+		}},
+		{name: "no hint at all", container: corev1.Container{
+			Name:    "warm-cache",
+			Image:   "vllm/vllm-openai:v0.33.0",
+			Command: []string{"python", "-c", "import torch"},
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := workloadPod()
+			container := tc.container
+			container.Resources = corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{names.SyntheticResourceName: resource.MustParse("1")},
+			}
+			pod.Spec.InitContainers = append(pod.Spec.InitContainers, container)
+
+			_, err := runtime.Mutate(pod, testAdmission())
+			if err == nil {
+				t.Fatalf("Mutate() accepted GPU init container %q", container.Name)
+			}
+			for _, want := range []string{container.Name, names.SyntheticResourceName, "not translated"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestMutatePreservesNonGPUInitContainer asserts the rejection is about the device
+// request, not about init containers: a setup step that requests no device is kept.
+func TestMutatePreservesNonGPUInitContainer(t *testing.T) {
 	pod := workloadPod()
 	pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
-		Name:    "model-download",
-		Image:   "python:3.12-slim",
-		Command: []string{"huggingface-cli", "download", "Qwen/Qwen3-0.6B"},
-		Resources: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{names.SyntheticResourceName: resource.MustParse("1")},
-		},
+		Name:    "prepare-config",
+		Image:   "busybox:1.36",
+		Command: []string{"sh", "-c", "echo ready"},
 	})
 	out := mutate(t, pod, testAdmission())
 
-	found := false
-	for _, container := range out.Spec.InitContainers {
-		if container.Name == "model-download" {
-			found = true
+	for _, name := range containerNames(out.Spec.InitContainers) {
+		if name == "prepare-config" {
+			return
 		}
 	}
-	if !found {
-		t.Fatalf("init containers = %v, want the weight downloader preserved", containerNames(out.Spec.InitContainers))
-	}
+	t.Fatalf("init containers = %v, want the non-GPU setup step preserved", containerNames(out.Spec.InitContainers))
 }
 
 // probeTarget renders an HTTP probe's path and port for assertions.

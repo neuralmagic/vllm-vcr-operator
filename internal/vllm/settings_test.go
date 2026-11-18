@@ -131,8 +131,8 @@ func TestResolveRustFrontendEnvironment(t *testing.T) {
 // Rejected recognises a bare Rejection as well as a rejection set, so callers can
 // wrap errors without losing structure.
 func TestRejectedAcceptsSingleRejection(t *testing.T) {
-	rs, ok := vllm.Rejected(vllm.Rejection{Setting: vllm.SettingPort, Reason: "test"})
-	if !ok || len(rs) != 1 || rs[0].Setting != vllm.SettingPort {
+	rs, ok := vllm.Rejected(vllm.Rejection{Setting: string(vllm.SettingPort), Reason: "test"})
+	if !ok || len(rs) != 1 || rs[0].Setting != string(vllm.SettingPort) {
 		t.Fatalf("Rejected() = %v, %v; want the single rejection", rs, ok)
 	}
 	if _, ok := vllm.Rejected(errors.New("unrelated")); ok {
@@ -143,13 +143,15 @@ func TestRejectedAcceptsSingleRejection(t *testing.T) {
 	}
 }
 
+// TestRejectionMessageShape pins the one rejection shape both stages share: the
+// setting, then the reason, with the offending value when there is one.
 func TestRejectionMessageShape(t *testing.T) {
-	withValue := vllm.Rejection{Setting: vllm.SettingPort, Value: "70000", Reason: "not a valid TCP port"}
-	if got, want := withValue.Error(), "vllm: --port=70000: not a valid TCP port"; got != want {
+	withValue := vllm.Rejection{Setting: string(vllm.SettingPort), Value: "70000", Reason: "not a valid TCP port"}
+	if got, want := withValue.Error(), "--port=70000: not a valid TCP port"; got != want {
 		t.Fatalf("rejection message = %q, want %q", got, want)
 	}
-	withoutValue := vllm.Rejection{Setting: vllm.SettingModel, Reason: "no model"}
-	if got, want := withoutValue.Error(), "vllm: --model: no model"; got != want {
+	withoutValue := vllm.Rejection{Setting: string(vllm.SettingModel), Reason: "no model"}
+	if got, want := withoutValue.Error(), "--model: no model"; got != want {
 		t.Fatalf("rejection message = %q, want %q", got, want)
 	}
 }

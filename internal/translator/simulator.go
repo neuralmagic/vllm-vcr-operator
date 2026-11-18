@@ -1,0 +1,188 @@
+package translator
+
+import (
+	"slices"
+	"strconv"
+	"strings"
+)
+
+// SimulatorInput is every value the `vllm-vcr play` invocation needs, already
+// resolved.
+//
+// It is exported because the simulator command has two callers: admission
+// (backendInvocation) and the runtime/serving spikes (test/spike), which must be
+// evidence for the arguments the operator actually ships rather than a second,
+// hand-maintained copy of them. A field that is empty or zero omits its flag.
+type SimulatorInput struct {
+	// HandshakeAddress is the engine-core endpoint the frontend binds and the
+	// simulator connects to.
+	HandshakeAddress string
+	// ModelName is the underlying model identity, never a served-model alias.
+	ModelName string
+	// MaxModelLen is the effective maximum model length.
+	MaxModelLen int64
+	// TokensPerBlock is the profile's recorded cache block size.
+	TokensPerBlock int64
+	// KVBlocks is the effective simulated KV-cache capacity in blocks.
+	KVBlocks int64
+	// ShutdownTimeout is the drain budget in seconds.
+	ShutdownTimeout int
+	// Seed makes random tokens and failure injection reproducible.
+	Seed int
+	// ControlAddress is the simulator control API's HOST:PORT listen address (not a
+	// ZMQ endpoint: the simulator binds it with TcpListener::bind).
+	ControlAddress string
+
+	// MaxNumSeqs and MaxNumBatchedTokens are the effective scheduler limits; zero
+	// omits the flag so the simulator's own default applies.
+	MaxNumSeqs          int64
+	MaxNumBatchedTokens int64
+	// LongPrefillTokens is emitted only when chunked prefill is active.
+	LongPrefillTokens int64
+	ChunkedPrefill    bool
+	// SchedulingPolicy is emitted only when it is set.
+	SchedulingPolicy string
+	// LogRequests enables the simulator's request log.
+	LogRequests bool
+	// EngineID is the Pod identity, when the caller supplies one.
+	EngineID string
+	// MaxLoras is the adapter diversity cap; zero omits the flag.
+	MaxLoras int
+	// PDRole is the P/D role; "" and "both" omit the flag.
+	PDRole string
+
+	// KVEvents enables the live KV-event publisher on KVEventsEndpoint with
+	// KVEventsTopic.
+	KVEvents         bool
+	KVEventsEndpoint string
+	KVEventsTopic    string
+
+	// LatencyTracePath is the recorded latency trace inside the profile mount.
+	// Empty omits all trace flags.
+	LatencyTracePath string
+	// ReplayTokensPath is the recorded token trace; non-empty adds
+	// --replay-tokens and --replay-match prefix.
+	ReplayTokensPath string
+	// ExpectConfigHash is the profile's recorded config fingerprint without the
+	// schema's optional "sha256:" tag.
+	ExpectConfigHash string
+}
+
+// SimulatorCommand returns the simulator argv: the `vllm-vcr play` command followed
+// by the flags SimulatorInput resolves to.
+//
+// Every flag is a real flag of the pinned simulator release
+// (hack/vllm-vcr-play-flags.txt); the MOCK_* variables in the upstream example
+// manifests are entrypoint-script inventions and are never emitted here.
+func SimulatorCommand(in SimulatorInput) []string {
+	args := []string{
+		"--handshake-address", in.HandshakeAddress,
+		"--model-name", in.ModelName,
+		"--max-model-len", strconv.FormatInt(in.MaxModelLen, 10),
+		"--tokens-per-block", strconv.FormatInt(in.TokensPerBlock, 10),
+		"--kv-cache-size", strconv.FormatInt(in.KVBlocks, 10),
+		"--shutdown-timeout", strconv.Itoa(in.ShutdownTimeout),
+		"--seed", strconv.Itoa(in.Seed),
+		"--control-address", in.ControlAddress,
+	}
+	if in.MaxNumSeqs > 0 {
+		args = append(args, "--max-num-seqs", strconv.FormatInt(in.MaxNumSeqs, 10))
+	}
+	if in.MaxNumBatchedTokens > 0 {
+		args = append(args, "--max-num-batched-tokens", strconv.FormatInt(in.MaxNumBatchedTokens, 10))
+	}
+	if in.ChunkedPrefill {
+		args = append(args, "--long-prefill-token-threshold", strconv.FormatInt(in.LongPrefillTokens, 10))
+	}
+	if in.SchedulingPolicy != "" {
+		args = append(args, "--scheduling-policy", in.SchedulingPolicy)
+	}
+	if in.LogRequests {
+		args = append(args, "--log-requests")
+	}
+	if identity := strings.TrimSpace(in.EngineID); identity != "" {
+		// A stable engine id keeps the ready-response instance id and the default
+		// KV-event topic tied to the Pod rather than to a process-local default.
+		args = append(args, "--engine-id", identity)
+	}
+	if in.MaxLoras > 0 {
+		args = append(args, "--max-loras", strconv.Itoa(in.MaxLoras))
+	}
+	if in.PDRole != "" && in.PDRole != "both" {
+		args = append(args, "--pd-role", in.PDRole)
+	}
+	if in.KVEvents {
+		args = append(args, "--enable-kv-cache-events", "--kv-events-endpoint", in.KVEventsEndpoint)
+		if in.KVEventsTopic != "" {
+			args = append(args, "--kv-events-topic", in.KVEventsTopic)
+		}
+	}
+	if in.LatencyTracePath != "" {
+		args = append(args, "--latency-trace", in.LatencyTracePath)
+	}
+	if in.ReplayTokensPath != "" {
+		args = append(args,
+			"--replay-tokens", in.ReplayTokensPath,
+			// Live clients (routers, load generators) do not use the replay
+			// harness's request ids, so prefix matching against the recorded block
+			// hashes is the only match mode that works for them.
+			"--replay-match", "prefix",
+		)
+	}
+	if in.ExpectConfigHash != "" {
+		args = append(args, "--expect-config-hash", in.ExpectConfigHash)
+	}
+	return append([]string{"vllm-vcr", "play"}, args...)
+}
+
+// SimulatorFlags returns every `--flag` spelling SimulatorCommand can emit, sorted
+// and deduplicated.
+//
+// It exists so the flag surface can be asserted as a package interface: the
+// checked-in list hack/vllm-vcr-play-flags.txt that the upstream drift check validates
+// is compared against this function, not against the source text. A flag added to
+// the builder appears here automatically, so it cannot silently escape the check.
+func SimulatorFlags() []string {
+	// A maximal input makes every optional flag reachable.
+	full := SimulatorCommand(SimulatorInput{
+		HandshakeAddress:    "tcp://127.0.0.1:1",
+		ModelName:           "model",
+		MaxModelLen:         1,
+		TokensPerBlock:      1,
+		KVBlocks:            1,
+		ShutdownTimeout:     1,
+		Seed:                1,
+		ControlAddress:      "0.0.0.0:1",
+		MaxNumSeqs:          1,
+		MaxNumBatchedTokens: 1,
+		LongPrefillTokens:   1,
+		ChunkedPrefill:      true,
+		SchedulingPolicy:    "fcfs",
+		LogRequests:         true,
+		EngineID:            "engine",
+		MaxLoras:            1,
+		PDRole:              "prefill",
+		KVEvents:            true,
+		KVEventsEndpoint:    "tcp://*:1",
+		KVEventsTopic:       "topic",
+		LatencyTracePath:    "trace",
+		ReplayTokensPath:    "trace",
+		ExpectConfigHash:    "hash",
+	})
+
+	seen := make(map[string]struct{})
+	flags := make([]string, 0, len(full))
+	for _, token := range full {
+		if !strings.HasPrefix(token, "--") {
+			continue
+		}
+		name, _, _ := strings.Cut(token, "=")
+		if _, duplicate := seen[name]; duplicate {
+			continue
+		}
+		seen[name] = struct{}{}
+		flags = append(flags, name)
+	}
+	slices.Sort(flags)
+	return flags
+}

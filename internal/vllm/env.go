@@ -73,7 +73,7 @@ func environmentSpecs() []environmentSpec {
 		{variable: "VLLM_LOG_STATS_INTERVAL", setting: SettingLogStatsInterval, apply: func(p *parser, raw string) *Rejection {
 			v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
 			if err != nil || v <= 0 {
-				return &Rejection{Setting: SettingLogStatsInterval, Value: raw, Reason: "not a positive number of seconds"}
+				return &Rejection{Setting: string(SettingLogStatsInterval), Value: raw, Reason: "not a positive number of seconds"}
 			}
 			p.cfg.Observability.LogStatsIntervalSeconds = &v
 			return nil
@@ -187,14 +187,14 @@ func (p *parser) applyEnvironment() {
 		}
 		if !resolved {
 			p.errs = append(p.errs, Rejection{
-				Setting: Setting(spec.variable),
+				Setting: string(Setting(spec.variable)),
 				Reason:  "the variable's value comes from a reference the Pod spec does not resolve, so the setting cannot be resolved",
 			})
 			continue
 		}
 		if rej := spec.apply(p, raw); rej != nil {
 			if rej.Setting == "" {
-				rej.Setting = Setting(spec.variable)
+				rej.Setting = string(Setting(spec.variable))
 			}
 			p.errs = append(p.errs, *rej)
 			continue
@@ -220,7 +220,7 @@ func (p *parser) envValue(env corev1.EnvVar) (string, bool) {
 func applyEnvInt(p *parser, raw string, setting Setting, target **int) *Rejection {
 	v, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil {
-		return &Rejection{Setting: setting, Value: raw, Reason: "not an integer"}
+		return &Rejection{Setting: string(setting), Value: raw, Reason: "not an integer"}
 	}
 	*target = &v
 	return nil

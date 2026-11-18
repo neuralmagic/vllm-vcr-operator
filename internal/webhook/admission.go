@@ -7,6 +7,8 @@ import (
 
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
 )
 
 // allowed admits the object unchanged.
@@ -38,7 +40,7 @@ func denied(message string) *admissionv1.AdmissionResponse {
 // workloadDenied rejects a Pod because of its own configuration.
 func workloadDenied(detail string) *admissionv1.AdmissionResponse {
 	return denied("the Pod cannot be simulated: " + detail +
-		". Remove the " + syntheticDeviceName +
+		". Remove the " + names.SyntheticResourceName +
 		" request to run the workload unmodified, or adjust the workload configuration named above.")
 }
 

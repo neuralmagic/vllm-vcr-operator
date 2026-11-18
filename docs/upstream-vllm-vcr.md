@@ -11,7 +11,7 @@ Two files are the machine-readable half of this record:
 | File | What it holds |
 | --- | --- |
 | [`hack/vllm-vcr-pin.env`](../hack/vllm-vcr-pin.env) | pinned commit, tag, verification date, `compat.toml` default line, target vLLM release |
-| [`hack/vllm-vcr-play-flags.txt`](../hack/vllm-vcr-play-flags.txt) | every `vllm-vcr play` flag the translator can emit (kept honest by `TestPlayFlagSurfaceMatchesDeclaration`) |
+| [`hack/vllm-vcr-play-flags.txt`](../hack/vllm-vcr-play-flags.txt) | every `vllm-vcr play` flag the translator can emit (kept honest by `TestPlayFlagSurfaceMatchesDeclaration`, which asserts the exported `translator.SimulatorFlags()` surface) |
 
 [`hack/check-vllm-vcr-upstream.sh`](../hack/check-vllm-vcr-upstream.sh) compares
 the pin, the flag surface, and the compat line against upstream and fails on real
@@ -78,7 +78,7 @@ Every row was read from the pinned checkout; the citation is `path:line` there.
 | The simulator binds the control address with `TcpListener::bind`, so any scheme in the value fails resolution and aborts `play` | `src/control.rs:319` | `internal/translator/frontend.go` (`--control-address 0.0.0.0:<port>`), `test/images/backend-stub` |
 | KV events: `--enable-kv-cache-events`, `--kv-events-endpoint` (`tcp://*:5557` by default, wildcard binds), `--kv-events-topic` (default `kv@<engine-id>@<model>`) | `src/lib.rs:321-335,438-450`, `src/kvevents.rs:81-101` | `names.KVEventsPort` (5556, the llm-d port), `internal/translator/effective.go` (`resolveKVEvents`) |
 | KV events are ZMQ **PUB**: topic frame, 8-byte big-endian sequence, msgpack payload; block hashes are binary big-endian | `src/kvevents.rs:8-22,103-110` | Documented, not produced, by the operator: `docs/capability-matrix.md` |
-| **No KV-event replay endpoint exists**: the ready response always reports `replay_endpoint: null` and the publisher has no responder | `crates/sim-protocol/src/frontend_connect.rs:92,107`, `src/kvevents.rs:165-228` | Admission rejects `replay_endpoint` unless a profile grants `capabilities.kvEventReplay` (`internal/translator/effective.go`) |
+| **No KV-event replay endpoint exists**: the ready response always reports `replay_endpoint: null` and the publisher has no responder | `crates/sim-protocol/src/frontend_connect.rs:92,107`, `src/kvevents.rs:165-228` | Admission rejects an explicit `replay_endpoint` unconditionally, naming the pin (`names.SupportedSimulatorTag`); the profile `capabilities.kvEventReplay` gate stays behind it (`internal/translator/effective.go`) |
 | Replay inputs: `--latency-trace` (modeled timing), `--replay-tokens` (recorded output ids), `--replay-match index|prefix`, `--expect-config-hash` | `src/lib.rs:141-170,226-230` | `internal/translator/frontend.go` (`traceArgs`) |
 | `--replay-match prefix` requires per-record `block_hashes` and, for dataset traces, `--model-name`; unmatched requests silently fall back to random tokens | `src/lib.rs:482-520`, `docs/trace-replay/content-identical.md:8-29` | Profile contract obligation (`docs/contracts/profile-image.md`); replay warning in every plan |
 | `config_hash` is a **bare lowercase-hex** SHA-256 stamped into the trace header and compared **verbatim** (never recomputed) | `crates/sim-trace/src/config_hash.rs:62-70`, `src/lib.rs:604-641` | `internal/profile.ConfigHashValue` strips the profile schema's optional `sha256:` tag before emission |

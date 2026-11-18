@@ -9,6 +9,7 @@ import (
 
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/profile"
+	"github.com/opendatahub-io/vllm-vcr-operator/internal/translator"
 )
 
 // Defaults for the spike run. They are the layout contract's ports and the
@@ -40,9 +41,6 @@ const (
 	// that the marker itself is observable, which is what incident diagnostics
 	// read.
 	ContainerRuntimeDir = "/tmp/vcr-runtime"
-
-	// backendBinary is the simulator binary inside VCR_BACKEND_IMAGE.
-	backendBinary = "vllm-vcr"
 
 	// frontendBinary is the frontend binary inside VCR_FRONTEND_IMAGE.
 	frontendBinary = "vllm"
@@ -235,45 +233,40 @@ func (s Settings) FrontendCommand() []string {
 
 // BackendCommand is the simulator container's argument tail: `vllm-vcr play`
 // connects to the handshake the frontend owns and serves the recorded profile.
+//
+// The command is built by translator.SimulatorCommand, the same builder admission
+// uses. The spike is therefore evidence for the arguments the operator ships, not
+// for a parallel copy of them: a flag or value that changes in the translator
+// changes here too.
 func (s Settings) BackendCommand() []string {
-	command := []string{
-		backendBinary, "play",
-		"--handshake-address", s.HandshakeAddress,
-		"--model-name", s.Model,
-		"--max-model-len", strconv.FormatInt(s.MaxModelLen, 10),
-		"--tokens-per-block", strconv.Itoa(int(s.TokensPerBlock)),
-		"--kv-cache-size", strconv.FormatInt(s.KVBlocks, 10),
-		// HOST:PORT, not a ZMQ endpoint: the simulator binds this with
-		// TcpListener::bind (upstream docs/control-api.md:3).
-		"--control-address", "0.0.0.0:" + strconv.Itoa(s.ControlPort),
-		"--latency-trace", s.TracePath(),
-		"--shutdown-timeout", strconv.Itoa(int(s.ShutdownTimeout.Seconds())),
-		"--seed", strconv.Itoa(s.Seed),
-		"--log-requests",
-	}
-	if s.MaxNumBatchedTokens > 0 {
-		command = append(command, "--max-num-batched-tokens", strconv.FormatInt(s.MaxNumBatchedTokens, 10))
-	}
-	if s.ConfigHash != "" {
-		command = append(command, "--expect-config-hash", s.ConfigHash)
-	}
-	if s.MaxNumSeqs > 0 {
-		command = append(command, "--max-num-seqs", strconv.FormatInt(s.MaxNumSeqs, 10))
+	input := translator.SimulatorInput{
+		HandshakeAddress:    s.HandshakeAddress,
+		ModelName:           s.Model,
+		MaxModelLen:         s.MaxModelLen,
+		TokensPerBlock:      int64(s.TokensPerBlock),
+		KVBlocks:            s.KVBlocks,
+		ShutdownTimeout:     int(s.ShutdownTimeout.Seconds()),
+		Seed:                s.Seed,
+		ControlAddress:      "0.0.0.0:" + strconv.Itoa(s.ControlPort),
+		MaxNumSeqs:          s.MaxNumSeqs,
+		MaxNumBatchedTokens: s.MaxNumBatchedTokens,
+		LogRequests:         true,
+		LatencyTracePath:    s.TracePath(),
+		// The profile schema may tag the hash with "sha256:"; the simulator
+		// compares a bare lowercase-hex value verbatim, exactly as admission emits
+		// it.
+		ExpectConfigHash: profile.ConfigHashValue(s.ConfigHash),
 	}
 	if s.ContentReplay {
-		command = append(command,
-			"--replay-tokens", s.TracePath(),
-			"--replay-match", "prefix",
-		)
+		input.ReplayTokensPath = s.TracePath()
 	}
 	if s.EnableKVEvents {
-		command = append(command,
-			"--enable-kv-cache-events",
-			"--kv-events-endpoint", fmt.Sprintf("tcp://*:%d", s.KVEventsPort),
-			"--kv-events-topic", fmt.Sprintf("kv@127.0.0.1:%d@%s", s.InferencePort, s.Model),
-		)
+		input.KVEvents = true
+		input.KVEventsEndpoint = fmt.Sprintf("tcp://*:%d", s.KVEventsPort)
+		// llm-d filters on kv@<pod ip:port>@<model>.
+		input.KVEventsTopic = fmt.Sprintf("kv@127.0.0.1:%d@%s", s.InferencePort, s.Model)
 	}
-	return command
+	return translator.SimulatorCommand(input)
 }
 
 // ProvisionerCommand is the profile provisioner init container's argument tail.

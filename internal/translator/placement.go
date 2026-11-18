@@ -70,15 +70,21 @@ func placementFor(env Environment) plan.Placement {
 
 // The values never leave the operator namespace except inside the projected copy
 // the webhook creates, so only names are carried here.
-func pullSecretsFor(env Environment, configuredImage string) []string {
-	if override := strings.TrimSpace(env.ProfilePullSecrets[configuredImage]); override != "" {
-		return []string{override}
+//
+// pullSecretsFor returns the candidate Secret names and, separately, the profile's
+// explicit override. An environment-wide list is only a set of candidates: the
+// webhook projects the entries that can actually apply to the selected image's
+// registry host, so one profile's private credentials are never copied into a
+// namespace for a profile served from another registry.
+func pullSecretsFor(env Environment, configuredImage string) (secrets []string, override string) {
+	if explicit := strings.TrimSpace(env.ProfilePullSecrets[configuredImage]); explicit != "" {
+		return []string{explicit}, explicit
 	}
-	secrets := make([]string, 0, len(env.PullSecrets))
+	secrets = make([]string, 0, len(env.PullSecrets))
 	for _, name := range env.PullSecrets {
 		if trimmed := strings.TrimSpace(name); trimmed != "" {
 			secrets = append(secrets, trimmed)
 		}
 	}
-	return dedupeStrings(secrets)
+	return dedupeStrings(secrets), ""
 }

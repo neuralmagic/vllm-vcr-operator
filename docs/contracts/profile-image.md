@@ -129,8 +129,10 @@ start when provisioning fails.
   against a trace without them. The operator never reads the trace, so it cannot
   verify this from metadata; the profile producer must.
 - `capabilities.kvEventReplay` must be true before replay-based recovery tests
-  can be claimed. The current simulator publishes live KV events but has no
-  replay endpoint.
+  can be claimed. The pinned simulator publishes live KV events but has no replay
+  endpoint, so an explicit `replay_endpoint` is rejected outright for this release
+  and the capability is currently a gate behind that rejection, not a way around
+  it.
 - Images referenced by tag are resolved and pinned by digest during
   reconciliation. Admission always pins a digest.
 - Pull credentials are Secret references in the operator namespace. Their values
