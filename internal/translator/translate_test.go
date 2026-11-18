@@ -62,6 +62,10 @@ func TestSettingsPolicyFamilies(t *testing.T) {
 				requireArgs(t, "frontend", a.Frontend.Args, "--host", "0.0.0.0")
 				requireArgs(t, "frontend", a.Frontend.Args, "--port", "8080")
 			}},
+		{name: "unix socket serving is rejected", args: []string{"--uds", "/tmp/vllm.sock"},
+			wantSetting: "--uds", wantReason: "Unix-domain-socket"},
+		{name: "headless serving is rejected", args: []string{"--headless"},
+			wantSetting: "--headless", wantReason: "headless"},
 		{name: "api key never enters the plan", args: []string{"--api-key", "s3cr3t-api-key"},
 			check: func(t *testing.T, a *plan.Admission) {
 				credentialFree(t, a, "s3cr3t-api-key")

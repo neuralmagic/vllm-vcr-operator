@@ -74,6 +74,11 @@ func frontendInvocation(cfg *vllm.Config, eff effective, env Environment, preser
 		Args:    args,
 		Env: []corev1.EnvVar{
 			{Name: "VCR_HANDSHAKE_ADDRESS", Value: handshakeAddress(eff)},
+			// Readiness combines the frontend's own health endpoint with the
+			// simulator's control API (docs/contracts/runtime-layout.md). The
+			// frontend port is the workload's, not a fixed 8000.
+			{Name: "VCR_FRONTEND_HEALTH_URL", Value: fmt.Sprintf("http://127.0.0.1:%d/health", eff.inferencePort)},
+			{Name: "VCR_BACKEND_HEALTH_URL", Value: fmt.Sprintf("http://127.0.0.1:%d/stats", names.ControlPort)},
 			{Name: "VCR_PROFILE_DIR", Value: names.ProfileMountPath},
 			{Name: "VCR_SHUTDOWN_TIMEOUT", Value: strconv.Itoa(eff.shutdownTimeout)},
 			{Name: "VCR_READY_FILE", Value: supervisor.DefaultReadyFile},

@@ -74,6 +74,8 @@ func TestFrontendArgumentsRunUnderTheSupervisor(t *testing.T) {
 
 	wantEnv := []corev1.EnvVar{
 		{Name: "VCR_HANDSHAKE_ADDRESS", Value: "tcp://127.0.0.1:29550"},
+		{Name: "VCR_FRONTEND_HEALTH_URL", Value: "http://127.0.0.1:8000/health"},
+		{Name: "VCR_BACKEND_HEALTH_URL", Value: "http://127.0.0.1:8001/stats"},
 		{Name: "VCR_PROFILE_DIR", Value: names.ProfileMountPath},
 		{Name: "VCR_SHUTDOWN_TIMEOUT", Value: "0"},
 		{Name: "VCR_READY_FILE", Value: "/tmp/vcr-runtime/ready"},
@@ -238,6 +240,19 @@ func TestHandshakePortFollowsTheWorkload(t *testing.T) {
 	requireArgs(t, "frontend", admission.Frontend.Args, "--data-parallel-rpc-port", "5570")
 	if got, want := envValue(admission.Frontend.Env, "VCR_HANDSHAKE_ADDRESS"), "tcp://127.0.0.1:5570"; got != want {
 		t.Errorf("VCR_HANDSHAKE_ADDRESS = %q, want %q", got, want)
+	}
+}
+
+// TestReadinessInputsFollowTheWorkloadPort asserts the supervisor observes the
+// workload's own inference port, not a fixed default.
+func TestReadinessInputsFollowTheWorkloadPort(t *testing.T) {
+	admission, err := runTranslate(t, translateCase{
+		name: "custom inference port",
+		args: []string{"--port", "8200"},
+	}, testEnvironment())
+	mustAccept(t, admission, err)
+	if got, want := envValue(admission.Frontend.Env, "VCR_FRONTEND_HEALTH_URL"), "http://127.0.0.1:8200/health"; got != want {
+		t.Errorf("VCR_FRONTEND_HEALTH_URL = %q, want %q", got, want)
 	}
 }
 

@@ -253,7 +253,7 @@ func TestMutateAppliesTheRuntimeLayout(t *testing.T) {
 	out := mutate(t, pod, testAdmission())
 
 	// Containers and init containers.
-	if got, want := containerNames(out.Spec.Containers), []string{workloadContainerName, sidecarContainerName, names.BackendContainerName}; !reflect.DeepEqual(got, want) {
+	if got, want := containerNames(out.Spec.Containers), []string{names.FrontendContainerName, sidecarContainerName, names.BackendContainerName}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("containers = %v, want %v", got, want)
 	}
 	if got, want := containerNames(out.Spec.InitContainers), []string{"wait-for-cache", names.ProvisionerContainerName}; !reflect.DeepEqual(got, want) {
@@ -261,7 +261,7 @@ func TestMutateAppliesTheRuntimeLayout(t *testing.T) {
 	}
 
 	// The workload's container identity, ports, probes, and labels survive.
-	frontend := containerByName(t, out.Spec.Containers, workloadContainerName)
+	frontend := containerByName(t, out.Spec.Containers, names.FrontendContainerName)
 	if got, want := frontend.Image, "quay.io/opendatahub/vllm-cpu:v0.33.0"; got != want {
 		t.Errorf("frontend image = %q, want %q", got, want)
 	}
@@ -349,7 +349,7 @@ func requireMount(t *testing.T, mounts []corev1.VolumeMount, volume, path string
 // under the supervisor with the plan's arguments and a policy-filtered environment.
 func TestMutateReplacesTheEntrypointWithTheSupervisor(t *testing.T) {
 	out := mutate(t, workloadPod(), testAdmission())
-	frontend := containerByName(t, out.Spec.Containers, workloadContainerName)
+	frontend := containerByName(t, out.Spec.Containers, names.FrontendContainerName)
 
 	if got, want := frontend.Command, []string{names.SupervisorBinary, "--"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("command = %v, want %v", got, want)
@@ -514,7 +514,7 @@ func TestMutateRemovesAcceleratorDeviceVolumes(t *testing.T) {
 		}
 	}
 
-	frontend := containerByName(t, out.Spec.Containers, workloadContainerName)
+	frontend := containerByName(t, out.Spec.Containers, names.FrontendContainerName)
 	for _, mount := range frontend.VolumeMounts {
 		if mount.Name == "device-plugins" {
 			t.Errorf("frontend still mounts the removed device-plugin volume")

@@ -133,6 +133,8 @@ variable name vLLM reads.
 | `--config-format` | preserve | forwarded to the frontend unchanged |
 | `--load-format` | translate | weights are never loaded by the frontend or the simulator, so the load format has no effect |
 | `--hf-overrides` | preserve | forwarded to the frontend unchanged |
+| `VLLM_USE_MODELSCOPE` | reject | ModelScope model hosting requires the modelscope client in the operator-provided frontend image, which does not include it |
+| `VLLM_MODEL_REDIRECT_PATH` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
 
 ### Tokenizer identity/revision and chat template
 
@@ -144,6 +146,12 @@ variable name vLLM reads.
 | `--skip-tokenizer-init` | reject | the frontend renders prompts and streams tokens, so it must load the tokenizer: a skipped tokenizer cannot serve requests |
 | `--chat-template` | preserve | preserved as --chat-template, either the container path (the mount is preserved) or the inline template |
 | `--default-chat-template-kwargs` | preserve | forwarded to the frontend unchanged |
+| `HF_ENDPOINT` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
+| `HF_HUB_CACHE` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
+| `HF_HOME` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
+| `HF_HUB_OFFLINE` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
+| `TRANSFORMERS_OFFLINE` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
+| `HF_TOKEN` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged; its value is never read |
 
 ### Served-model aliases
 
@@ -157,9 +165,9 @@ variable name vLLM reads.
 | --- | --- | --- |
 | `--host` | preserve | the frontend builder always emits --host from the effective value, so no duplicate flag is produced |
 | `--port` | preserve | the frontend builder always emits --port from the effective value, so no duplicate flag is produced |
-| `--uds` | preserve | forwarded to the frontend unchanged |
+| `--uds` | reject | a Unix-domain-socket server has no TCP endpoint, so kubelet probes, llm-d discovery, and the supervisor's readiness input cannot reach it; serve on the inference port instead |
 | `--grpc-port` | preserve | forwarded to the frontend unchanged |
-| `--headless` | preserve | a headless frontend serves no HTTP API: probes and llm-d discovery cannot pass without one |
+| `--headless` | reject | a headless server exposes no HTTP API, so readiness, probes, and llm-d discovery cannot pass; only a serving workload can be simulated |
 | `--api-server-count` | preserve | forwarded to the frontend unchanged |
 | `--uvicorn-log-level` | preserve | forwarded to the frontend unchanged |
 | `--disable-uvicorn-access-log` | preserve | forwarded to the frontend unchanged |
@@ -169,6 +177,7 @@ variable name vLLM reads.
 | `--ssl-certfile` | preserve | forwarded to the frontend unchanged |
 | `--ssl-ca-certs` | preserve | forwarded to the frontend unchanged |
 | `--ssl-cert-reqs` | preserve | forwarded to the frontend unchanged |
+| `VLLM_USE_RUST_FRONTEND` | reject | the workload cannot substitute the operator-provided Python frontend with another implementation |
 
 ### Tool/reasoning parsers and frontend formatting
 
@@ -302,6 +311,7 @@ variable name vLLM reads.
 | --- | --- | --- |
 | `--shutdown-timeout` | translate | applied to the simulator's coordinated drain and to the supervisor's graceful shutdown budget |
 | `VLLM_WORKER_SHUTDOWN_TIMEOUT_SECONDS` | translate | no local engine workers exist, so the worker shutdown timeout has no effect; the supervisor uses --shutdown-timeout |
+| `VLLM_ENGINE_READY_TIMEOUT_S` | preserve | preserved as the workload container's environment variable: the frontend must wait for the simulator to register |
 
 ### Logging and telemetry
 
@@ -366,40 +376,12 @@ variable name vLLM reads.
 | --- | --- | --- |
 | `--config` | translate | the config file's effective values are re-emitted as explicit flags; the file itself is not passed to the frontend |
 
-### Model identity/revision
-
-| Setting | Disposition | Treatment |
-| --- | --- | --- |
-| `VLLM_USE_MODELSCOPE` | reject | ModelScope model hosting requires the modelscope client in the operator-provided frontend image, which does not include it |
-| `VLLM_MODEL_REDIRECT_PATH` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
-
-### Host, inference port, API authentication, TLS
-
-| Setting | Disposition | Treatment |
-| --- | --- | --- |
-| `VLLM_USE_RUST_FRONTEND` | reject | the workload cannot substitute the operator-provided Python frontend with another implementation |
-
-### Tokenizer identity/revision and chat template
-
-| Setting | Disposition | Treatment |
-| --- | --- | --- |
-| `HF_ENDPOINT` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
-| `HF_HUB_CACHE` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
-| `HF_HOME` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
-| `HF_HUB_OFFLINE` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
-| `TRANSFORMERS_OFFLINE` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
-| `HF_TOKEN` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged; its value is never read |
-
-### Shutdown timeout
-
-| Setting | Disposition | Treatment |
-| --- | --- | --- |
-| `VLLM_ENGINE_READY_TIMEOUT_S` | preserve | preserved as the workload container's environment variable, which the runtime forwards unchanged |
-
 ## Frontend invocation
 
-The workload's vLLM container keeps its name, ports, probes, mounts, sizing
-sources, and service-account identity, and its entrypoint becomes the supervisor:
+The workload's vLLM container keeps its ports, probes, mounts, sizing sources, and
+service-account identity, takes the layout's documented container name
+(`vllm-frontend`, `names.FrontendContainerName`), and its entrypoint becomes the
+supervisor:
 
 ```text
 vcr-supervisor -- vllm serve <model> --host <h> --port <p> \
@@ -420,12 +402,17 @@ vcr-supervisor -- vllm serve <model> --host <h> --port <p> \
   policy rejected.
 - A `--tool-parser-plugin` or `--reasoning-parser-plugin` is rejected: a plugin is code
   that would have to exist in the operator-provided frontend image.
+- `--uds` and `--headless` are rejected: neither exposes an HTTP endpoint on the
+  inference port, so kubelet probes, llm-d discovery, and the supervisor's readiness
+  input could never pass. Readiness is not something admission can fake.
 
 Environment set on the frontend container:
 
 | Variable | Value |
 | --- | --- |
 | `VCR_HANDSHAKE_ADDRESS` | `tcp://127.0.0.1:<handshake>`, the engine-core handshake the frontend **binds** |
+| `VCR_FRONTEND_HEALTH_URL` | `http://127.0.0.1:<inference port>/health`, the readiness input served by the frontend |
+| `VCR_BACKEND_HEALTH_URL` | `http://127.0.0.1:<control port>/stats`, the readiness input served by the simulator control API |
 | `VCR_PROFILE_DIR` | `names.ProfileMountPath` |
 | `VCR_SHUTDOWN_TIMEOUT` | the workload's `--shutdown-timeout`, in seconds |
 | `VCR_READY_FILE` | the supervisor's readiness marker |
@@ -528,6 +515,11 @@ available flag, is the authority.
 
 ## Known gaps
 
+- The supervisor's readiness inputs are configured by name from
+  `docs/contracts/runtime-layout.md` (`VCR_FRONTEND_HEALTH_URL`,
+  `VCR_BACKEND_HEALTH_URL`). A supervisor build that does not read them falls back to
+  its own defaults; the plan already sets the correct values, so the fallback is only a
+  fidelity gap for non-default inference ports.
 - The resolver in `internal/vllm` accepts only the affirmative spelling of boolean
   flags, so an explicit `false` (for example `--no-enable-prefix-caching`) is rejected
   as an unknown flag before this policy runs. The combination checks handle the case

@@ -6,12 +6,13 @@
 // what resources the injected runtime receives, and which placement constraints are
 // accelerator-specific; this package applies exactly that and nothing more.
 //
-// The layout it produces is documented in docs/contracts/runtime-layout.md:
-// the workload's own vLLM container keeps its identity, inference port, probes,
-// mounts, and GPU allocation, but runs the supervisor instead of the engine; the
-// simulator and the profile provisioner are injected; a shared profile volume holds
-// the exported profile data. Mutation is idempotent, so applying it twice is a
-// no-op, and it never writes credential material anywhere.
+// The layout it produces is documented in docs/contracts/runtime-layout.md: the
+// workload's own vLLM container keeps its inference port, probes, mounts, and GPU
+// allocation, but takes the layout's container identity (names.FrontendContainerName)
+// and runs the supervisor instead of the engine; the simulator and the profile
+// provisioner are injected; a shared profile volume holds the exported profile data.
+// Mutation is idempotent, so applying it twice is a no-op, and it never writes
+// credential material anywhere.
 package runtime
 
 import (
@@ -234,6 +235,10 @@ func rewriteFrontendContainer(container, original *corev1.Container, admission *
 		return err
 	}
 
+	// The injected frontend container carries the layout's documented identity
+	// (docs/contracts/runtime-layout.md, names.FrontendContainerName); everything
+	// else about the workload container is preserved.
+	container.Name = names.FrontendContainerName
 	container.Image = frontend.Image
 	container.ImagePullPolicy = corev1.PullIfNotPresent
 	container.Command = append([]string(nil), frontend.Command...)

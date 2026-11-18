@@ -83,6 +83,10 @@ func resolveEffective(cfg *vllm.Config, metadata *profile.Metadata, req Request,
 		eff.warnings = append(eff.warnings, fmt.Sprintf(
 			"--host: the frontend binds %q, so kubelet probes on the Pod IP and llm-d discovery cannot reach it",
 			eff.inferenceHost))
+	} else if !isWildcardHost(eff.inferenceHost) {
+		eff.warnings = append(eff.warnings, fmt.Sprintf(
+			"--host: the frontend binds %q while readiness observes 127.0.0.1:%d, which that address does not accept",
+			eff.inferenceHost, eff.inferencePort))
 	}
 
 	// Engine-core handshake port: the frontend binds it, the simulator connects.
@@ -450,6 +454,16 @@ func endpointPort(endpoint string) int {
 		}
 	}
 	return 0
+}
+
+// isWildcardHost reports whether host accepts connections on every address.
+func isWildcardHost(host string) bool {
+	switch strings.TrimSpace(host) {
+	case "", "0.0.0.0", "::", "[::]":
+		return true
+	default:
+		return false
+	}
 }
 
 // isLoopbackHost reports whether host only accepts connections from inside the
