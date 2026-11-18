@@ -10,6 +10,14 @@
 // This package is pure: it contains no Kubernetes client calls. Reconciliation
 // and admission both depend on it, which keeps selection rules independently
 // testable.
+//
+// The package's rules follow one principle: a profile either fully explains the
+// workload or the workload is rejected. Parse rejects documents that cannot be
+// completely understood, NewCatalog keeps unusable candidates visible as
+// rejected candidates instead of dropping them, Select requires exactly one
+// compatible profile, ValidateOverrides treats absent coverage as unsupported,
+// and RequireCapability treats absent capabilities as unsupported. Nothing is
+// inferred, defaulted, or approximated across a profile boundary.
 package profile
 
 // Metadata is the profile document published by the profile repository. The
@@ -127,6 +135,12 @@ type Capabilities struct {
 	Multimodal           bool     `json:"multimodal,omitempty"`
 	Embeddings           bool     `json:"embeddings,omitempty"`
 	DisaggregatedPrefill bool     `json:"disaggregatedPrefill,omitempty"`
+
+	// ContentReplay states that recorded token IDs can be replayed with
+	// validated matching, so content-identical assertions are authorized for
+	// this profile. It requires trace.recordedTokens; metadata that claims it
+	// without recorded token IDs is rejected.
+	ContentReplay bool `json:"contentReplay,omitempty"`
 }
 
 // Requirements are the effective workload settings that constrain profile
