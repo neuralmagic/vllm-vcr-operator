@@ -17,6 +17,7 @@ import (
 
 	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/controller"
+	operatorwebhook "github.com/opendatahub-io/vllm-vcr-operator/internal/webhook"
 )
 
 var (
@@ -86,6 +87,18 @@ func main() {
 	}
 	if err := environmentReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to register the simulation environment reconciler")
+		os.Exit(1)
+	}
+
+	if err := operatorwebhook.SetupWithManager(mgr, operatorwebhook.Options{
+		Client:            mgr.GetClient(),
+		Reader:            mgr.GetAPIReader(),
+		OperatorNamespace: operatorNS,
+		FrontendImage:     operatorwebhook.FrontendImageFromEnv(os.Getenv),
+		BackendImage:      operatorwebhook.BackendImageFromEnv(os.Getenv),
+		Recorder:          mgr.GetEventRecorderFor("pod-admission"),
+	}); err != nil {
+		setupLog.Error(err, "unable to register the admission webhooks")
 		os.Exit(1)
 	}
 

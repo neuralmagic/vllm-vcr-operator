@@ -46,25 +46,6 @@ re-synchronization cannot happen. Reconciliable profiles for this release declar
 Consequence for tests: reconnect/recovery acceptance for prefix-cache routing
 cannot be claimed. Live-event routing tests alone do not establish it.
 
-### The supervisor's readiness inputs are narrower than the contract
-
-`docs/contracts/runtime-layout.md` defines readiness as three inputs: the frontend
-child is alive, the frontend's own HTTP health endpoint answers `200`, and the
-simulator's control API answers. The supervisor in this tree publishes readiness
-from the first input plus a **TCP dial of the handshake port**.
-
-The handshake port is bound by the frontend, so a successful dial is not proof
-that an engine registered. Consequence: `/readyz` and the readiness marker
-(`/tmp/vcr-runtime/ready`) can report ready for an engine-less frontend. Pod
-readiness itself is unaffected — the workload's own `/v1/models` probe is
-preserved and does not pass before engine registration — but the diagnostic signal
-is weaker than documented.
-
-The runtime-layout spike asserts the contract, so a `make test-spike` run with
-images reports this as a failing step (`readiness stays withdrawn while the
-simulator is absent`) until the supervisor reads `VCR_FRONTEND_HEALTH_URL` and
-`VCR_BACKEND_HEALTH_URL`.
-
 ### Per-token logprobs are empty
 
 The simulator produces no per-token logprobs. `--max-logprobs` is preserved for the

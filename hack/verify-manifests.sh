@@ -198,9 +198,11 @@ validating_path='/validate-vcr-opendatahub-io-v1alpha1-simulationenvironment'
 build_has "mutating webhook path $mutating_path" \
   "$MUTATING_SEL"' | select(.clientConfig.service.path == "'"$mutating_path"'")'
 
-build_has "mutating webhook is fail-closed, side-effect free, v1, Equivalent" \
+# The mutating webhook projects a pull Secret on non-dry-run requests, so its
+# declared side effects are NoneOnDryRun; dry-run requests must write nothing.
+build_has "mutating webhook is fail-closed, dry-run side-effect free, v1, Equivalent" \
   "$MUTATING_SEL"' | select(.failurePolicy == "Fail"
-     and .sideEffects == "None"
+     and .sideEffects == "NoneOnDryRun"
      and .matchPolicy == "Equivalent"
      and (.admissionReviewVersions | any_c(. == "v1")))'
 

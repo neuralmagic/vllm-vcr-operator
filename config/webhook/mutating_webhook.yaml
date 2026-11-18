@@ -2,8 +2,9 @@
 # simulated runtime layout (see docs/contracts/admission.md).
 #
 # - failurePolicy Fail: an applicable Pod is never admitted untranslated.
-# - sideEffects None: it only returns a patch, and skips pull-secret projection on
-#   dry-run requests.
+# - sideEffects NoneOnDryRun: the response is only a patch, but a non-dry-run
+#   request also projects the profile pull Secret into the workload namespace.
+#   Dry-run requests write nothing, which is what NoneOnDryRun declares.
 # - reinvocationPolicy is intentionally unset (defaults to Never): admission is
 #   idempotent, so leaving it unset keeps the API server from re-running it.
 # - The operator namespace is excluded so the operator's own Pods are never
@@ -43,5 +44,5 @@ webhooks:
         resources:
           - pods
         scope: Namespaced
-    sideEffects: None
+    sideEffects: NoneOnDryRun
     timeoutSeconds: 10

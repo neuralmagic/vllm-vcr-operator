@@ -117,14 +117,13 @@ demonstrate readiness or shutdown cannot be claimed.
 | Timing fidelity | The profile's recorded latency is served unchanged and is never compared with a fresh capture. Functional success is not a performance claim |
 | llm-d interaction | No router or discovery component runs in this spike. Cache-local routing is `make test-cluster`'s assertion |
 | Reconnection of a restarted peer | Not attempted and not claimed (see above) |
-| The supervisor's `/readyz` matching the contract | The supervisor in this tree publishes readiness from child liveness plus a handshake TCP dial, not from the two HTTP inputs the contract names. Consequence: the readiness step fails until the supervisor reads `VCR_FRONTEND_HEALTH_URL` and `VCR_BACKEND_HEALTH_URL`. Recorded as an open gap in [`docs/limitations.md`](../limitations.md) |
+| The supervisor's `/readyz` matching the contract | Implemented by ticket 13: readiness is frontend liveness plus the frontend health URL and the simulator control URL, with a regression test proving a handshake dial alone never reports ready. |
 | Pod-level readiness (kubelet probes) | This spike drives the container surfaces directly. The webhook's preserved `/v1/models` probe is asserted by `make test-e2e` |
 
 ## Unresolved items and their consequences
 
 | Open item | Consequence now | Where it resolves |
 | --- | --- | --- |
-| Supervisor readiness inputs narrower than the contract | `/readyz` and the readiness marker can report ready for an engine-less frontend; the diagnostic signal is weaker than documented. Pod readiness is unaffected | Supervisor implementation work; the harness already fails on it |
 | No reconnection in either process | Every recovery path is a Pod/container restart. A test that restarts one process and expects the other to continue is wrong | Accepted design; the harness records it |
 | KV-event replay missing | Router re-synchronization after a lost event window is impossible; recovery acceptance cannot be claimed | The operator **rejects** an explicit `replay_endpoint` unless a profile grants `capabilities.kvEventReplay`, and no reconcilable profile does |
 | `--shutdown-timeout 0` (vLLM's default) aborts in-flight requests | A workload that does not set a shutdown timeout gets immediate termination; draining tests must set one | Preserved semantics: the workload's value is applied to both the simulator and the supervisor. Not a gap |

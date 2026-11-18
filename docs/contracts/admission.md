@@ -71,9 +71,12 @@ No annotation, status field, log line, or event may contain a Secret value.
 - Unsupported advanced feature (pipeline parallelism, distributed workers, P/D,
   LoRA, speculative decoding, multimodal, embeddings, structured outputs):
   reject unless the selected profile's capability set grants it.
-- Dry-run requests receive the same response as real requests.
-- The webhook never downloads profile images, creates resources, or mutates the
-  submitted controller manifest.
+- Dry-run requests receive the same response as real requests, but a dry-run
+  request writes nothing (no pull-secret copy is created).
+- The only resource a real admission creates is the operator-managed
+  `imagePullSecret` copy projected into the workload namespace. The webhook never
+  downloads profile images, never reconciles profile metadata, and never mutates
+  the submitted controller manifest.
 
 ## Runtime layout
 
