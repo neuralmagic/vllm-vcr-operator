@@ -30,6 +30,10 @@ type parser struct {
 
 // newParser builds a parser for cfg. The flag table is derived from cfg so that
 // each spec writes directly into the Config being resolved.
+//
+// The table has two passes: every canonical spelling first, then every negation
+// of a modelled boolean setting. A canonical spelling therefore always wins a
+// name collision, and no negation can shadow a different setting.
 func newParser(inv Invocation, cfg *Config) *parser {
 	p := &parser{
 		inv:   inv,
@@ -37,19 +41,24 @@ func newParser(inv Invocation, cfg *Config) *parser {
 		files: newFileResolver(inv),
 		specs: make(map[string]flagSpellings),
 	}
-	for _, spec := range flags(cfg) {
-		specCopy := spec
-		p.specs[string(spec.setting)] = flagSpellings{setting: spec.setting, spec: &specCopy, boolValue: true}
+	specs := flags(cfg)
+	for i := range specs {
+		spec := &specs[i]
+		p.specs[string(spec.setting)] = flagSpellings{setting: spec.setting, spec: spec, boolValue: true}
+	}
+	for i := range specs {
+		spec := &specs[i]
 		if spec.kind != kindBool {
 			continue
 		}
-		// BooleanOptionalAction spellings exist only where vLLM 0.33.0 registers
-		// them; knownFlags is the complete list of spellings for the release.
+		// vLLM 0.33.0 gives every boolean option both spellings, so a negation is
+		// derived from the setting rather than looked up in knownFlags: the
+		// release's own spelling list is not exhaustive for negations.
 		for _, negated := range negatedSpellings(string(spec.setting)) {
-			if !knownFlag(negated) {
+			if _, taken := p.specs[negated]; taken {
 				continue
 			}
-			p.specs[negated] = flagSpellings{setting: spec.setting, spec: &specCopy, boolValue: false}
+			p.specs[negated] = flagSpellings{setting: spec.setting, spec: spec, boolValue: false}
 		}
 	}
 	return p
@@ -157,6 +166,15 @@ func (p *parser) applyTokens(tokens []string) {
 }
 
 // setBool applies a value-less boolean flag.
+//
+// A boolean setting has no conflicting-spellings rule: vLLM 0.33.0 registers the
+// positive and the negated spelling on one argparse option, so the last occurrence
+// on a command line wins, exactly as argparse behaves. "--enable-prefix-caching
+// --no-enable-prefix-caching" therefore resolves to false. Repeating a setting is
+// not a conflict with the layer below either: the command line simply overrides the
+// config file or environment value it repeats, which leaves precedence unchanged.
+// This package reports what the release would do, so it does not reject the
+// repetition.
 func (p *parser) setBool(spec *flagSpec, value bool) *Rejection {
 	v := value
 	*spec.bptr = &v
@@ -426,10 +444,29 @@ func credentialishFlag(name string) bool {
 	return false
 }
 
-// parseAndEncodeConfigFile converts config-file YAML into arguments, the way
-// vLLM 0.33.0 loads them: keys are long flag names, objects become JSON, lists
-// become repeated values, and booleans become the flag or its negated spelling.
-func parseAndEncodeConfigFile(content []byte) ([]string, *Rejection) {
+// negatedSpelling returns the spelling that expresses an explicit false for a
+// boolean config-file key: the one the resolver registers for that setting or, for
+// a release flag this operator does not model, the release's own negated spelling,
+// so that the rejection names the flag instead of the config file.
+func (p *parser) negatedSpelling(setting string) (string, bool) {
+	candidates := negatedSpellings(setting)
+	for _, negated := range candidates {
+		if _, modelled := p.specs[negated]; modelled {
+			return negated, true
+		}
+	}
+	for _, negated := range candidates {
+		if knownFlag(negated) {
+			return negated, true
+		}
+	}
+	return "", false
+}
+
+// encodeConfigFile converts config-file YAML into arguments, the way vLLM 0.33.0
+// loads them: keys are long flag names, objects become JSON, lists become repeated
+// values, and booleans become the flag or its negated spelling.
+func (p *parser) encodeConfigFile(content []byte) ([]string, *Rejection) {
 	values, err := decodeYAMLMapping(content)
 	if err != nil {
 		return nil, &Rejection{Setting: SettingConfigFile, Reason: err.Error()}
@@ -443,14 +480,18 @@ func parseAndEncodeConfigFile(content []byte) ([]string, *Rejection) {
 				tokens = append(tokens, "--"+key)
 				continue
 			}
-			// vLLM only expresses "false" through a negated spelling, which
-			// exists only for BooleanOptionalAction flags.
-			for _, negated := range negatedSpellings("--" + key) {
-				if knownFlag(negated) {
-					tokens = append(tokens, negated)
-					break
+			// vLLM only expresses "false" through a negated spelling, so a key whose
+			// negation cannot be expressed is a rejection: dropping it would report
+			// a configuration the workload did not ask for.
+			negated, ok := p.negatedSpelling("--" + key)
+			if !ok {
+				return nil, &Rejection{
+					Setting: SettingConfigFile,
+					Value:   entry.key,
+					Reason:  "a false value is expressed by the setting's negated spelling, and vLLM 0.33.0 registers none for this key",
 				}
 			}
+			tokens = append(tokens, negated)
 		case []any:
 			tokens = append(tokens, "--"+key)
 			for _, item := range value {

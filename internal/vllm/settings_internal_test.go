@@ -17,15 +17,6 @@ func TestModelledFlagSpellingsExistInVLLM(t *testing.T) {
 			t.Errorf("setting %q is modelled twice (also as %q)", name, previous)
 		}
 		seen[name] = spec.setting
-
-		for _, negated := range negatedSpellings(name) {
-			if knownFlag(negated) {
-				if previous, dup := seen[negated]; dup {
-					t.Errorf("spelling %q is registered twice (also as %q)", negated, previous)
-				}
-				seen[negated] = spec.setting
-			}
-		}
 	}
 
 	for short, long := range shortFlags {
@@ -34,6 +25,53 @@ func TestModelledFlagSpellingsExistInVLLM(t *testing.T) {
 		}
 		if _, modelled := seen[long]; !modelled {
 			t.Errorf("short flag %q maps to %q, which is not a modelled setting", short, long)
+		}
+	}
+}
+
+// Every boolean setting has both spellings registered, the negated one maps to
+// false, and no negated spelling shadows a different setting's canonical
+// spelling. A missing negation would make an explicit false an unknown flag; a
+// shadowing one would make one setting configure another.
+func TestNegatedSpellingsAreRegisteredPerBooleanSetting(t *testing.T) {
+	p := newParser(Invocation{}, newConfig())
+
+	for _, spec := range flags(newConfig()) {
+		canonical, ok := p.specs[string(spec.setting)]
+		if !ok {
+			t.Fatalf("canonical spelling %q is not registered", spec.setting)
+		}
+		if !canonical.boolValue {
+			t.Errorf("canonical spelling %q does not imply true", spec.setting)
+		}
+		if spec.kind != kindBool {
+			continue
+		}
+		for _, negated := range negatedSpellings(string(spec.setting)) {
+			spelling, registered := p.specs[negated]
+			if !registered {
+				t.Errorf("negated spelling %q of %s is not registered", negated, spec.setting)
+				continue
+			}
+			if spelling.setting != spec.setting {
+				t.Errorf("negated spelling %q configures %s, want %s", negated, spelling.setting, spec.setting)
+			}
+			if spelling.boolValue {
+				t.Errorf("negated spelling %q implies true", negated)
+			}
+		}
+	}
+
+	// A negation is only ever derived from a boolean setting, so a value-taking
+	// setting has no negated spelling at all.
+	for _, spec := range flags(newConfig()) {
+		if spec.kind == kindBool {
+			continue
+		}
+		for _, negated := range negatedSpellings(string(spec.setting)) {
+			if _, registered := p.specs[negated]; registered {
+				t.Errorf("%q is registered although %s takes a value", negated, spec.setting)
+			}
 		}
 	}
 }

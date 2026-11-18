@@ -13,7 +13,7 @@
 //
 //   - vllm/entrypoints/cli/serve.py, .../cli/openai.py, .../common/cli_args.py
 //     and vllm/engine/arg_utils.py for the `vllm serve` interface, including the
-//     BooleanOptionalAction spellings ("--enable-x"/"--disable-x"),
+//     BooleanOptionalAction spellings ("--enable-x"/"--no-enable-x"/"--disable-x"),
 //     nargs="+" flags, the "-O" optimisation shorthand, and the rule that the
 //     positional model argument overrides --model.
 //   - vllm/utils/argparse_utils.py for the --config file format (long flag names,

@@ -10,6 +10,11 @@ package vllm
 // workload author knows whether to remove the flag or to wait for operator
 // support.
 //
+// The list is not exhaustive for negated boolean spellings: argparse generates
+// "--no-<flag>" from the option's action, so this package derives that spelling
+// from each modelled boolean setting (see negatedSpellings) instead of relying on
+// a hand-kept enumeration.
+//
 // Do not add spellings by hand: the list is the release's interface.
 var knownFlags = map[string]bool{
 	"--additional-config": true, "--aggregate-engine-logging": true, "--all2all-backend": true,
