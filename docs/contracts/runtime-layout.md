@@ -36,13 +36,31 @@ underlying health.
 ## Supervision and failure propagation
 
 `vcr-supervisor` runs the frontend as its only long-lived child because the
-simulator is supervised by kubelet in its own container. The supervisor:
+simulator is supervised by kubelet in its own container.
 
-- reports readiness by exposing a local health endpoint that combines frontend
-  process liveness with engine-registration state, so a Pod is never ready with an
-  unavailable backend;
-- terminates the frontend when the backend disappears (the frontend's engine RPC
-  channel closes) rather than leaving a healthy-looking but engine-less server;
+### What readiness means
+
+Readiness requires all three inputs, and any one of them failing withdraws it:
+
+1. the frontend child process is alive;
+2. the frontend's own HTTP health endpoint on the inference port answers `200`
+   (in external-engine mode the vLLM server does not serve before the engine
+   handshake completes);
+3. the simulator's control API (`GET /stats` on `names.ControlPort`) answers.
+
+Dialing the handshake port is **not** a readiness signal. The frontend binds that
+socket, so a TCP connection succeeds while no engine is registered; using it would
+report ready for an engine-less server. This is a verified property of the
+`vllm-vcr`/vLLM frontend pairing, not an assumption.
+
+The supervisor exposes `/healthz` (frontend child alive) and `/readyz` (the three
+inputs above) on `--health-address`, and writes the ready file when `/readyz`
+becomes true. It:
+
+- withdraws readiness immediately when either HTTP input fails, so a Pod is never
+  ready with an unavailable backend;
+- terminates the frontend when the backend stays unavailable past
+  `--backend-loss-grace` rather than leaving a healthy-looking engine-less server;
 - forwards `SIGTERM` to the frontend, waits for its graceful shutdown within the
   configured shutdown timeout, then exits, so draining tests observe controlled
   termination;
@@ -58,7 +76,9 @@ evidence for this claim and records whichever behavior the pinned images exhibit
 
 | Variable | Purpose |
 | --- | --- |
-| `VCR_HANDSHAKE_ADDRESS` | Handshake endpoint, default `tcp://127.0.0.1:29550`. |
+| `VCR_HANDSHAKE_ADDRESS` | Handshake endpoint, default `tcp://127.0.0.1:29550` (supervisor passes it to the frontend; it is not a readiness signal). |
+| `VCR_FRONTEND_HEALTH_URL` | Frontend health URL, default `http://127.0.0.1:8000/health`. |
+| `VCR_BACKEND_HEALTH_URL` | Simulator control URL, default `http://127.0.0.1:8001/stats`. |
 | `VCR_PROFILE_DIR` | Exported profile directory, default `/var/run/vcr/profile`. |
 | `VCR_SHUTDOWN_TIMEOUT` | Graceful shutdown budget, seconds, from the workload's vLLM setting. |
 | `VCR_READY_FILE` | File the supervisor writes once the engine is registered. |
