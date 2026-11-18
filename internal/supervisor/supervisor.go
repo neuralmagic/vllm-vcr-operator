@@ -5,23 +5,30 @@
 // container and the vllm-vcr simulator in its own container (see
 // docs/contracts/runtime-layout.md). The supervisor is the frontend container's
 // entrypoint: it starts the frontend as its only long-lived child, reports
-// readiness that combines frontend process liveness with engine registration,
-// propagates failures, and shuts the container down in a coordinated way.
+// readiness from the readiness inputs the contract defines, propagates failures,
+// and shuts the container down in a coordinated way.
 //
-// The engine registration state is observed by dialing the engine-core handshake
-// address over TCP: readiness requires the frontend process to be alive and that
-// endpoint to accept connections. The supervisor never restarts or resurrects
-// the simulator; recovery is restart-based, not reconnect-based.
+// Readiness requires all three of the following, and any one of them failing
+// withdraws it:
 //
-// Integration note: because readiness is "a connection to HandshakeAddress
-// succeeds", that address must name an endpoint that only accepts connections
-// while an engine is registered. The runtime layout therefore passes the
-// registration endpoint the simulator publishes to the frontend, not the port
-// the frontend itself binds; the runtime spike records the pinned images'
-// observed behavior and must configure HandshakeAddress accordingly.
+//  1. the frontend child process is alive;
+//  2. the frontend's own HTTP health endpoint (FrontendHealthURL) answers 2xx;
+//  3. the simulator's control API (BackendHealthURL) answers 2xx.
+//
+// Dialing the engine-core handshake address is deliberately not a readiness
+// signal: the frontend binds that socket, so a connection to it succeeds while no
+// simulator is registered, which would report ready for an engine-less server.
+// The handshake address is still passed to the frontend, but the supervisor never
+// probes it.
+//
+// The supervisor never restarts or resurrects the simulator; recovery is
+// restart-based, not reconnect-based. When the simulator's control API stays
+// unavailable past the backend loss grace, the frontend is terminated so that the
+// container restarts instead of serving without an engine.
 //
 // Environment variables read by cmd/supervisor (docs/contracts/runtime-layout.md):
-// VCR_HANDSHAKE_ADDRESS, VCR_READY_FILE, and VCR_SHUTDOWN_TIMEOUT (seconds).
+// VCR_HANDSHAKE_ADDRESS, VCR_FRONTEND_HEALTH_URL, VCR_BACKEND_HEALTH_URL,
+// VCR_READY_FILE, and VCR_SHUTDOWN_TIMEOUT (seconds).
 package supervisor
 
 import (
@@ -31,6 +38,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,24 +53,43 @@ import (
 // Defaults applied by New when a Config field is left zero.
 var (
 	// DefaultHandshakeAddress is the engine-core handshake endpoint the
-	// frontend binds and the simulator connects to.
+	// frontend binds and the simulator connects to. The supervisor passes it to
+	// the frontend and does not probe it.
 	DefaultHandshakeAddress = fmt.Sprintf("tcp://127.0.0.1:%d", names.HandshakePort)
+
+	// DefaultFrontendHealthURL is the frontend's own health endpoint on the
+	// default inference port.
+	DefaultFrontendHealthURL = fmt.Sprintf("http://127.0.0.1:%d/health", names.DefaultInferencePort)
+
+	// DefaultBackendHealthURL is the simulator's control API.
+	DefaultBackendHealthURL = fmt.Sprintf("http://127.0.0.1:%d/stats", names.ControlPort)
+
+	// DefaultHealthAddress is the endpoint serving /healthz and /readyz for the
+	// frontend container. It binds every interface because kubelet probes the
+	// Pod's IP, not its loopback.
+	DefaultHealthAddress = fmt.Sprintf("0.0.0.0:%d", DefaultHealthPort)
 )
 
 const (
+	// HealthPath is the liveness path: the frontend child process is alive.
+	HealthPath = "/healthz"
+
+	// ReadyPath is the full readiness path: the three readiness inputs hold.
+	ReadyPath = "/readyz"
+
+	// DefaultHealthPort is the port the supervisor serves HealthPath and
+	// ReadyPath on. The operator points the container's probes at it.
+	DefaultHealthPort = 8082
+
 	// DefaultReadyFile is the readiness marker incident diagnostics read.
 	DefaultReadyFile = "/tmp/vcr-runtime/ready"
 
-	// DefaultHealthAddress is the loopback endpoint serving /healthz and
-	// /readyz for the frontend container.
-	DefaultHealthAddress = "127.0.0.1:8082"
-
-	// DefaultBackendLossGrace is how long the engine may stay unreachable
-	// before the frontend is terminated.
+	// DefaultBackendLossGrace is how long the simulator control API may stay
+	// unhealthy before the frontend is terminated.
 	DefaultBackendLossGrace = 5 * time.Second
 
-	// DefaultPollInterval is how often engine registration is probed.
-	DefaultPollInterval = 100 * time.Millisecond
+	// DefaultHealthPollInterval is how often each readiness input is probed.
+	DefaultHealthPollInterval = 100 * time.Millisecond
 
 	// exitCodeFailure is the container exit code used when the supervisor
 	// itself forces a restart.
@@ -72,8 +99,11 @@ const (
 	// be reaped, so that a wedged child cannot hang the container.
 	reapTimeout = 10 * time.Second
 
-	// probeTimeout bounds a single engine-registration probe.
-	probeTimeout = 200 * time.Millisecond
+	// healthProbeTimeout bounds a single health request. It is much shorter than
+	// a kubelet probe timeout so that a hung endpoint cannot stall the poll loop
+	// for long, and it is cancelled with the supervisor context so shutdown never
+	// waits on an outstanding request.
+	healthProbeTimeout = time.Second
 )
 
 // Config describes how the supervisor runs and observes the frontend.
@@ -92,21 +122,30 @@ type Config struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
-	// HandshakeAddress is the engine-core handshake endpoint, either
-	// "tcp://host:port" or "host:port". Readiness requires a successful TCP
-	// connection to it, which stands for engine registration.
+	// HandshakeAddress is the engine-core handshake endpoint the frontend binds,
+	// either "tcp://host:port" or "host:port". The supervisor passes it through
+	// and never probes it: a connection to the socket the frontend itself binds
+	// says nothing about whether an engine is registered.
 	HandshakeAddress string
 
-	// ReadyFile is written atomically once the frontend is alive and the engine
-	// is registered, and removed whenever readiness is lost.
+	// FrontendHealthURL is the frontend's own HTTP health endpoint on the
+	// inference port. It must answer 2xx for the Pod to be ready.
+	FrontendHealthURL string
+
+	// BackendHealthURL is the simulator's control API URL. It must answer 2xx
+	// for the Pod to be ready.
+	BackendHealthURL string
+
+	// ReadyFile is written atomically while all readiness inputs hold, and
+	// removed as soon as one of them fails.
 	ReadyFile string
 
 	// HealthAddress is the listen address of the local health endpoint serving
-	// /healthz (frontend liveness) and /readyz (readiness).
+	// HealthPath (frontend liveness) and ReadyPath (full readiness).
 	HealthAddress string
 
-	// BackendLossGrace is how long the engine may stay unreachable before the
-	// frontend is terminated and the container exits non-zero.
+	// BackendLossGrace is how long the simulator control API may stay unhealthy
+	// before the frontend is terminated and the container exits non-zero.
 	BackendLossGrace time.Duration
 
 	// ShutdownTimeout is the graceful shutdown budget for the frontend. Zero
@@ -114,8 +153,8 @@ type Config struct {
 	// waiting, matching a workload that configures vLLM --shutdown-timeout 0.
 	ShutdownTimeout time.Duration
 
-	// PollInterval is how often engine registration is probed.
-	PollInterval time.Duration
+	// HealthPollInterval is how often each readiness input is probed.
+	HealthPollInterval time.Duration
 
 	// Logf logs supervisor decisions. Nil discards them.
 	Logf func(format string, args ...any)
@@ -124,17 +163,21 @@ type Config struct {
 // Supervisor runs the frontend child and its health endpoint. A Supervisor is
 // single-use: call Run once.
 type Supervisor struct {
-	cfg          Config
-	handshake    string
-	pollInterval time.Duration
-	logf         func(format string, args ...any)
+	cfg                Config
+	frontendHealthURL  string
+	backendHealthURL   string
+	healthPollInterval time.Duration
+	client             *http.Client
+	logf               func(format string, args ...any)
 
-	mu               sync.Mutex
-	childAlive       bool
-	backendConnected bool
-	shuttingDown     bool
-	publishedReady   bool
-	healthAddr       string
+	mu             sync.Mutex
+	childAlive     bool
+	frontendHealth bool
+	backendHealth  bool
+	backendLostAt  time.Time
+	shuttingDown   bool
+	publishedReady bool
+	healthAddr     string
 }
 
 // New validates cfg, applies defaults, and returns a Supervisor.
@@ -145,8 +188,16 @@ func New(cfg Config) (*Supervisor, error) {
 	if cfg.HandshakeAddress == "" {
 		cfg.HandshakeAddress = DefaultHandshakeAddress
 	}
-	handshake, err := ParseHandshakeAddress(cfg.HandshakeAddress)
-	if err != nil {
+	if cfg.FrontendHealthURL == "" {
+		cfg.FrontendHealthURL = DefaultFrontendHealthURL
+	}
+	if err := validateHealthURL("frontend health URL", cfg.FrontendHealthURL); err != nil {
+		return nil, err
+	}
+	if cfg.BackendHealthURL == "" {
+		cfg.BackendHealthURL = DefaultBackendHealthURL
+	}
+	if err := validateHealthURL("backend health URL", cfg.BackendHealthURL); err != nil {
 		return nil, err
 	}
 	if cfg.ReadyFile == "" {
@@ -164,8 +215,11 @@ func New(cfg Config) (*Supervisor, error) {
 	if cfg.ShutdownTimeout < 0 {
 		return nil, fmt.Errorf("supervisor: shutdown timeout %s must not be negative", cfg.ShutdownTimeout)
 	}
-	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = DefaultPollInterval
+	switch {
+	case cfg.HealthPollInterval < 0:
+		return nil, fmt.Errorf("supervisor: health poll interval %s must not be negative", cfg.HealthPollInterval)
+	case cfg.HealthPollInterval == 0:
+		cfg.HealthPollInterval = DefaultHealthPollInterval
 	}
 	if cfg.Stdout == nil {
 		cfg.Stdout = os.Stdout
@@ -178,11 +232,33 @@ func New(cfg Config) (*Supervisor, error) {
 		logf = func(string, ...any) {}
 	}
 	return &Supervisor{
-		cfg:          cfg,
-		handshake:    handshake,
-		pollInterval: cfg.PollInterval,
-		logf:         logf,
+		cfg:                cfg,
+		frontendHealthURL:  cfg.FrontendHealthURL,
+		backendHealthURL:   cfg.BackendHealthURL,
+		healthPollInterval: cfg.HealthPollInterval,
+		client: &http.Client{
+			Timeout: healthProbeTimeout,
+			// A redirect is not a 2xx answer, and following one would probe a
+			// different endpoint than the configured one.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
+		logf: logf,
 	}, nil
+}
+
+// validateHealthURL rejects a readiness input the supervisor cannot interpret.
+func validateHealthURL(setting, raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("supervisor: %s %q is not a URL: %v", setting, raw, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("supervisor: %s %q uses scheme %q: only http and https endpoints can be probed", setting, raw, parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("supervisor: %s %q has no host, so it cannot be probed", setting, raw)
+	}
+	return nil
 }
 
 // HealthAddress returns the address the health endpoint is bound to, or "" when
@@ -232,7 +308,8 @@ func (s *Supervisor) Run(ctx context.Context) (int, error) {
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	events := make(chan watchEvent, 1)
-	go s.watchBackend(watchCtx, events)
+	go s.watchHealth(watchCtx, "frontend health", s.frontendHealthURL, s.setFrontendHealthy)
+	go s.watchBackendLoss(watchCtx, events)
 
 	for {
 		select {
@@ -247,7 +324,6 @@ func (s *Supervisor) Run(ctx context.Context) (int, error) {
 			// Already gone by the time the signal arrived: propagate its code.
 			if code, ok := drainExit(exitCh); ok {
 				s.setChildAlive(false)
-				s.publishReadiness()
 				return code, nil
 			}
 			s.logf("shutdown requested; terminating frontend")
@@ -265,33 +341,33 @@ func (s *Supervisor) Run(ctx context.Context) (int, error) {
 			}
 			if code, ok := drainExit(exitCh); ok {
 				s.setChildAlive(false)
-				s.publishReadiness()
 				return code, nil
 			}
-			s.logf("engine at %s unreachable for longer than %s; terminating frontend", s.handshake, s.cfg.BackendLossGrace)
+			s.logf("simulator control API at %s unhealthy for longer than %s; terminating frontend", s.backendHealthURL, s.cfg.BackendLossGrace)
 			s.beginShutdown()
 			s.stopChild(cmd, exitCh)
 			s.setChildAlive(false)
-			return exitCodeFailure, fmt.Errorf("supervisor: engine at %s was unreachable for longer than %s", s.handshake, s.cfg.BackendLossGrace)
+			return exitCodeFailure, fmt.Errorf("supervisor: simulator control API at %s was unhealthy for longer than %s", s.backendHealthURL, s.cfg.BackendLossGrace)
 		}
 	}
 }
 
 func (s *Supervisor) handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(HealthPath, func(w http.ResponseWriter, r *http.Request) {
 		if s.isChildAlive() {
 			_, _ = io.WriteString(w, "frontend alive\n")
 			return
 		}
 		http.Error(w, "frontend not running", http.StatusServiceUnavailable)
 	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if s.isReady() {
-			_, _ = io.WriteString(w, "ready\n")
+	mux.HandleFunc(ReadyPath, func(w http.ResponseWriter, r *http.Request) {
+		ready, reason := s.readiness()
+		if !ready {
+			http.Error(w, reason, http.StatusServiceUnavailable)
 			return
 		}
-		http.Error(w, s.readinessReason(), http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, "ready\n")
 	})
 	return mux
 }
@@ -349,42 +425,38 @@ func drainExit(exitCh <-chan error) (int, bool) {
 type watchEvent int
 
 const (
-	eventBackendRegistered watchEvent = iota
-	eventBackendLost
+	eventBackendLost watchEvent = iota
 )
 
-// watchBackend polls engine registration and publishes readiness. It reports
-// eventBackendLost once the engine has been unreachable for longer than the
-// configured grace period, then stops.
-func (s *Supervisor) watchBackend(ctx context.Context, events chan<- watchEvent) {
-	ticker := time.NewTicker(s.pollInterval)
+// watchHealth probes one readiness input on every poll interval and publishes the
+// result. Each input has its own loop so that a hung endpoint cannot delay the
+// others.
+func (s *Supervisor) watchHealth(ctx context.Context, setting, healthURL string, apply func(bool)) {
+	ticker := time.NewTicker(s.healthPollInterval)
 	defer ticker.Stop()
-	var connected bool
-	var lostSince time.Time
 	for {
+		apply(s.probe(ctx, setting, healthURL))
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
-		ok := s.probeBackend()
-		if ok != connected {
-			connected = ok
-			s.setBackendConnected(ok)
-			if ok {
-				lostSince = time.Time{}
-				s.logf("engine registered at %s", s.handshake)
-				select {
-				case events <- eventBackendRegistered:
-				default:
-				}
-			} else {
-				lostSince = time.Now()
-				s.logf("engine connection to %s lost", s.handshake)
-			}
-			continue
-		}
-		if !ok && !lostSince.IsZero() && time.Since(lostSince) > s.cfg.BackendLossGrace {
+	}
+}
+
+// watchBackendLoss probes the simulator control API and reports eventBackendLost
+// once it has been unhealthy for longer than the configured grace period.
+func (s *Supervisor) watchBackendLoss(ctx context.Context, events chan<- watchEvent) {
+	ticker := time.NewTicker(s.healthPollInterval)
+	defer ticker.Stop()
+	for {
+		healthy := s.probe(ctx, "simulator control API", s.backendHealthURL)
+		s.setBackendHealthy(healthy)
+
+		s.mu.Lock()
+		lostAt, wasLost := s.backendLostAt, !s.backendLostAt.IsZero()
+		s.mu.Unlock()
+		if wasLost && time.Since(lostAt) > s.cfg.BackendLossGrace {
 			// Deliver the loss without leaking when Run has already stopped.
 			select {
 			case events <- eventBackendLost:
@@ -392,27 +464,67 @@ func (s *Supervisor) watchBackend(ctx context.Context, events chan<- watchEvent)
 			}
 			return
 		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
 
-func (s *Supervisor) probeBackend() bool {
-	timeout := s.pollInterval
-	if timeout > probeTimeout {
-		timeout = probeTimeout
+// probe reports whether healthURL answers 2xx. The request is bounded by a short
+// timeout and by ctx, so neither a hung endpoint nor an outstanding request can
+// stall the poll loop or shutdown.
+func (s *Supervisor) probe(ctx context.Context, setting, healthURL string) bool {
+	reqCtx, cancel := context.WithTimeout(ctx, healthProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, healthURL, nil)
+	if err != nil {
+		s.logf("%s: cannot build a request for %s: %v", setting, healthURL, err)
+		return false
 	}
-	conn, err := net.DialTimeout("tcp", s.handshake, timeout)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return false
 	}
-	_ = conn.Close()
-	return true
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
-func (s *Supervisor) setBackendConnected(connected bool) {
+func (s *Supervisor) setFrontendHealthy(healthy bool) {
 	s.mu.Lock()
-	s.backendConnected = connected
+	changed := s.frontendHealth != healthy
+	s.frontendHealth = healthy
 	s.mu.Unlock()
+	if changed {
+		s.logf("frontend health at %s: %s", s.frontendHealthURL, describeHealth(healthy))
+	}
 	s.publishReadiness()
+}
+
+func (s *Supervisor) setBackendHealthy(healthy bool) {
+	s.mu.Lock()
+	changed := s.backendHealth != healthy
+	s.backendHealth = healthy
+	if healthy {
+		s.backendLostAt = time.Time{}
+	} else if s.backendLostAt.IsZero() {
+		s.backendLostAt = time.Now()
+	}
+	s.mu.Unlock()
+	if changed {
+		s.logf("simulator control API at %s: %s", s.backendHealthURL, describeHealth(healthy))
+	}
+	s.publishReadiness()
+}
+
+func describeHealth(healthy bool) string {
+	if healthy {
+		return "healthy"
+	}
+	return "unhealthy"
 }
 
 func (s *Supervisor) setChildAlive(alive bool) {
@@ -437,24 +549,28 @@ func (s *Supervisor) isChildAlive() bool {
 	return s.childAlive
 }
 
-func (s *Supervisor) isReady() bool {
+// readiness reports the current readiness state and, when not ready, the input
+// that fails.
+func (s *Supervisor) readiness() (bool, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.childAlive && s.backendConnected && !s.shuttingDown
+	return s.readinessLocked()
 }
 
-func (s *Supervisor) readinessReason() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// readinessLocked is readiness for callers that already hold the lock, so that a
+// decision and the state it is based on cannot be observed apart.
+func (s *Supervisor) readinessLocked() (bool, string) {
 	switch {
 	case s.shuttingDown:
-		return "shutting down"
+		return false, "shutting down"
 	case !s.childAlive:
-		return "frontend not running"
-	case !s.backendConnected:
-		return "no engine registered on " + s.handshake
+		return false, "frontend not running"
+	case !s.frontendHealth:
+		return false, "frontend health at " + s.frontendHealthURL + " is not 2xx"
+	case !s.backendHealth:
+		return false, "simulator control API at " + s.backendHealthURL + " is not 2xx"
 	default:
-		return "ready"
+		return true, "ready"
 	}
 }
 
@@ -462,7 +578,7 @@ func (s *Supervisor) readinessReason() string {
 // logs transitions.
 func (s *Supervisor) publishReadiness() {
 	s.mu.Lock()
-	ready := s.childAlive && s.backendConnected && !s.shuttingDown
+	ready, reason := s.readinessLocked()
 	changed := ready != s.publishedReady
 	s.publishedReady = ready
 	s.mu.Unlock()
@@ -474,10 +590,9 @@ func (s *Supervisor) publishReadiness() {
 			s.logf("cannot write ready file %q: %v", s.cfg.ReadyFile, err)
 			return
 		}
-		s.logf("ready: frontend alive and engine registered")
+		s.logf("ready: frontend alive, frontend health and simulator control API answered")
 		return
 	}
-	reason := s.readinessReason()
 	removeReadyFile(s.cfg.ReadyFile)
 	s.logf("not ready: %s", reason)
 }
@@ -532,24 +647,4 @@ func exitCode(err error) int {
 		return 128 + int(ws.Signal())
 	}
 	return exitCodeFailure
-}
-
-// ParseHandshakeAddress normalizes "tcp://host:port" or "host:port" into the
-// host:port form the probe dials, rejecting endpoints it cannot observe.
-func ParseHandshakeAddress(addr string) (string, error) {
-	rest := addr
-	if scheme, tail, ok := strings.Cut(addr, "://"); ok {
-		if scheme != "tcp" {
-			return "", fmt.Errorf("supervisor: handshake address %q uses unsupported scheme %q: only tcp:// endpoints can be observed", addr, scheme)
-		}
-		rest = tail
-	}
-	host, port, err := net.SplitHostPort(rest)
-	if err != nil {
-		return "", fmt.Errorf("supervisor: handshake address %q is not a tcp host:port endpoint: %v", addr, err)
-	}
-	if host == "" || port == "" {
-		return "", fmt.Errorf("supervisor: handshake address %q is not a tcp host:port endpoint", addr)
-	}
-	return net.JoinHostPort(host, port), nil
 }

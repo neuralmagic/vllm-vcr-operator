@@ -7,12 +7,12 @@
 // accelerator-specific; this package applies exactly that and nothing more.
 //
 // The layout it produces is documented in docs/contracts/runtime-layout.md: the
-// workload's own vLLM container keeps its inference port, probes, mounts, and GPU
-// allocation, but takes the layout's container identity (names.FrontendContainerName)
-// and runs the supervisor instead of the engine; the simulator and the profile
-// provisioner are injected; a shared profile volume holds the exported profile data.
-// Mutation is idempotent, so applying it twice is a no-op, and it never writes
-// credential material anywhere.
+// workload's own vLLM container keeps its inference port, mounts, and GPU
+// allocation, but takes the layout's container identity (names.FrontendContainerName),
+// runs the supervisor instead of the engine, and is probed through that supervisor;
+// the simulator and the profile provisioner are injected; a shared profile volume
+// holds the exported profile data. Mutation is idempotent, so applying it twice is
+// a no-op, and it never writes credential material anywhere.
 package runtime
 
 import (
@@ -21,9 +21,11 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
+	"github.com/opendatahub-io/vllm-vcr-operator/internal/supervisor"
 )
 
 // tmpVolumeName and tmpMountPath give the simulator a writable scratch directory
@@ -34,6 +36,15 @@ import (
 const (
 	tmpVolumeName = "vcr-tmp"
 	tmpMountPath  = "/tmp"
+
+	// supervisorHealthPortName is the container port name of the supervisor's
+	// liveness and readiness endpoint, so the probes are visible in the Pod's
+	// port list.
+	supervisorHealthPortName = "supervisor-health"
+
+	// controlStatsPath is the simulator control API surface used as its readiness
+	// probe (vllm-vcr docs/control-api.md: GET /stats).
+	controlStatsPath = "/stats"
 )
 
 // Mutate returns a copy of pod with the admission plan applied.
@@ -222,8 +233,8 @@ func recognizedGPUInitContainer(container corev1.Container) bool {
 }
 
 // rewriteFrontendContainer turns the workload's vLLM container into the frontend
-// container: same identity, ports, probes, and mounts; a different entrypoint,
-// image, environment, and sizing.
+// container: same identity, ports, and mounts; a different entrypoint, image,
+// environment, sizing, and probes.
 func rewriteFrontendContainer(container, original *corev1.Container, admission *plan.Admission) error {
 	frontend := admission.Frontend
 	if len(frontend.Command) == 0 {
@@ -245,9 +256,76 @@ func rewriteFrontendContainer(container, original *corev1.Container, admission *
 	container.Args = append(append([]string(nil), frontend.Args...), copied...)
 	container.Env = mergeEnv(original.Env, frontend.Env, frontend.RemoveEnv)
 	container.Ports = mergePorts(original.Ports, frontend.Ports)
+	container.Ports = mergePorts(container.Ports, []corev1.ContainerPort{{
+		Name:          supervisorHealthPortName,
+		ContainerPort: supervisor.DefaultHealthPort,
+		Protocol:      corev1.ProtocolTCP,
+	}})
 	container.Resources = mergeResources(admission.Resources.Frontend, original.Resources)
 	addProfileMount(&container.VolumeMounts, true)
+	if err := checkReadinessInputs(container.Env); err != nil {
+		return err
+	}
+	applyFrontendProbes(container)
 	return nil
+}
+
+// readinessInputEnvVars are the environment entries that tell the supervisor which
+// endpoints decide readiness. The translator derives them from the workload's
+// inference port and names.ControlPort; this package only checks that the plan
+// carries them, because the supervisor would otherwise fall back to the default
+// ports and report a non-default inference port as unhealthy forever.
+var readinessInputEnvVars = []string{"VCR_FRONTEND_HEALTH_URL", "VCR_BACKEND_HEALTH_URL"}
+
+// checkReadinessInputs rejects a plan that cannot configure the supervisor's
+// readiness inputs.
+func checkReadinessInputs(env []corev1.EnvVar) error {
+	present := make(map[string]struct{}, len(env))
+	for _, entry := range env {
+		present[entry.Name] = struct{}{}
+	}
+	for _, name := range readinessInputEnvVars {
+		if _, ok := present[name]; !ok {
+			return fmt.Errorf(
+				"runtime: the admission plan sets no %s for the frontend container, so the supervisor would probe default ports instead of the workload's",
+				name)
+		}
+	}
+	return nil
+}
+
+// applyFrontendProbes points the container's probes at the supervisor instead of
+// the inference port.
+//
+// The workload's own readiness probe only observes the frontend process: in
+// external-engine mode the server answers it while the simulator is gone, so it
+// would keep an engine-less server Ready. The supervisor's /readyz combines the
+// frontend process, the frontend's health endpoint, and the simulator control API,
+// which is exactly the contract's readiness definition.
+func applyFrontendProbes(container *corev1.Container) {
+	container.LivenessProbe = &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+			Path:   supervisor.HealthPath,
+			Port:   intstr.FromInt32(supervisor.DefaultHealthPort),
+			Scheme: corev1.URISchemeHTTP,
+		}},
+		TimeoutSeconds:   2,
+		PeriodSeconds:    10,
+		FailureThreshold: 3,
+	}
+	container.ReadinessProbe = &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+			Path:   supervisor.ReadyPath,
+			Port:   intstr.FromInt32(supervisor.DefaultHealthPort),
+			Scheme: corev1.URISchemeHTTP,
+		}},
+		// A single failed evaluation withdraws readiness: the supervisor has
+		// already decided, and a Pod must not stay Ready with an unavailable
+		// backend.
+		TimeoutSeconds:   2,
+		PeriodSeconds:    5,
+		FailureThreshold: 1,
+	}
 }
 
 // copiedArguments resolves the argument fragments the plan copies from the
@@ -382,6 +460,27 @@ func backendContainer(admission *plan.Admission) (corev1.Container, error) {
 		Env:             append([]corev1.EnvVar(nil), backend.Env...),
 		Ports:           append([]corev1.ContainerPort(nil), backend.Ports...),
 		Resources:       *admission.Resources.Backend.DeepCopy(),
+		// Readiness is the control API, which is also the supervisor's backend
+		// readiness input. Liveness is a socket check on the same port: a dial
+		// proves the simulator is running, which is all liveness ever claims.
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+				Path:   controlStatsPath,
+				Port:   intstr.FromInt32(names.ControlPort),
+				Scheme: corev1.URISchemeHTTP,
+			}},
+			TimeoutSeconds:   2,
+			PeriodSeconds:    5,
+			FailureThreshold: 2,
+		},
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{
+				Port: intstr.FromInt32(names.ControlPort),
+			}},
+			TimeoutSeconds:   2,
+			PeriodSeconds:    10,
+			FailureThreshold: 3,
+		},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: names.ProfileVolumeName, MountPath: names.ProfileMountPath, ReadOnly: true},
 			{Name: tmpVolumeName, MountPath: tmpMountPath},
