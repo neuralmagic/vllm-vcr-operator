@@ -1,0 +1,4 @@
+# Failure diagnostics written by test/cluster. Never committed: they contain
+# cluster state that is only meaningful for the run that produced it.
+*
+!.gitignore
