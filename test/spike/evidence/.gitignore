@@ -1,0 +1,6 @@
+# Harness output is evidence about the machine that ran it, never a checked-in
+# artifact: a stale document would read as a current demonstration. Only the
+# format reference is tracked.
+*
+!.gitignore
+!schema.example.json

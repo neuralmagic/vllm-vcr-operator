@@ -542,3 +542,113 @@ available flag, is the authority.
   function of the requested number.
 - Simulated capability sets that the serving-behavior spike has not validated must be
   empty: an available frontend flag is not evidence of working end-to-end behavior.
+
+## Why these dispositions
+
+The four accepting dispositions are not degrees of support; they are four
+different claims, and each one is only as strong as its evidence.
+
+- **`preserve`** means "the real Python vLLM frontend implements this, and the
+  operator does not interfere". It is the strongest claim the operator can make
+  for a serving feature, and it is still only a claim about *forwarding*: whether
+  the feature behaves as a user expects is vLLM's behavior, not this operator's.
+  A preserved setting that the frontend cannot act on in external-engine mode
+  (there is no engine rank, no weights, no accelerator) carries a `Warning`
+  instead of pretending.
+- **`translate`** means "the setting survives in a different form". The form is
+  always one of three: a simulator flag, a profile requirement, or a deliberate
+  no-op that changes no observable behavior. A no-op that *would* change observable
+  behavior is a `reject`, not a `translate` with a warning: recorded timing is
+  served either way, so `--enforce-eager` is a no-op, while `--pipeline-parallel-size
+  2` is not.
+- **`require-profile`** means "the profile's recording is the authority". Topology,
+  precision, and cache representation are recorded properties; a workload value
+  that disagrees with the recording is rejected rather than approximated, because
+  the recorded timing was produced by exactly one configuration.
+- **`require-capability`** means "only a validated capability set may authorize
+  this". The set is produced by the serving-behavior spike and shipped in profile
+  metadata ([`docs/contracts/profile-image.md`](contracts/profile-image.md)). A
+  frontend flag that exists is not evidence: an available `--enable-lora` does not
+  authorize LoRA serving, and [`docs/capability-matrix.md`](capability-matrix.md)
+  says so row by row.
+- **`reject`** is the default for everything else, including settings nobody has
+  classified. The policy table is data, so a new vLLM flag is rejected as an
+  unknown behavior-affecting setting until someone adds a reviewed row.
+
+Two structural consequences follow, and both are testable:
+
+- the table is the implementation (`translator.Policy()`), and a test asserts every
+  row has a disposition and a reason, so there is no silent fallthrough;
+- omission is never permission. A missing policy row rejects, a missing coverage
+  range rejects, a missing capability rejects, and a missing profile rejects.
+
+## vLLM 0.33.0 flag names
+
+The policy table keys are the vLLM 0.33.0 spellings exactly, because the resolver
+matches them exactly. Details that matter when writing a workload or adding a row:
+
+- **Two namespaces.** Command-line flags appear as `--flag-name`; settings vLLM
+  reads from the environment appear as the variable name (`VLLM_DP_RANK`,
+  `HF_HOME`, `TF_*`). A row is one or the other, never both.
+- **The model is positional.** `--model` and `model` both appear as rows because
+  `vllm serve <model>` and `vllm serve --model <model>` are both accepted; both
+  are preserved identically.
+- **JSON-valued flags.** `--kv-events-config`, `--kv-transfer-config`,
+  `--speculative-config`, `--compilation-config`, `--structured-outputs-config`,
+  `--pooler-config`, `--hf-overrides`, and `--limit-mm-per-prompt` take JSON
+  objects. They are decoded into typed settings so their fields can be validated
+  individually; an unknown field inside them is a rejection that names the field.
+- **Booleans resolve only affirmatively** (see *Known gaps*): `--enable-prefix-caching`
+  parses; `--no-enable-prefix-caching` is an unknown flag.
+- **Defaults are not requests.** A setting the workload did not set never triggers
+  a policy decision, even when vLLM has a default for it. A default that the
+  simulator must know (maximum model length, sequence caps) is resolved from the
+  profile's coverage instead, and a warning is recorded when the profile does not
+  vouch for it.
+- **Unknown flags are rejected before the policy runs.** The resolver refuses an
+  unrecognized flag or an unknown `--config` file key rather than executing a
+  shell wrapper or introspecting the image to guess its meaning.
+
+## Rejection examples
+
+Rejections are structured (`translator.Rejection`, `vllm.Rejection`): a setting
+name followed by a reason. The reason text below is taken from the policy table
+and the validators it drives, so it is the text a rejected workload actually sees.
+Reason text that lives in a `fmt.Sprintf` template is shown with the profile's
+recorded value.
+
+| Workload | Rejection | What protects the user |
+| --- | --- | --- |
+| `--pipeline-parallel-size 2` | `--pipeline-parallel-size: pipeline parallelism greater than one is rejected pending validated translation: the simulated engine models one stage` | The workload cannot silently run with one simulated stage while claiming two |
+| `--enable-lora --max-loras 4`, profile grants no LoRA | `--enable-lora: profile "<id>" does not support capability "lora": the profile's validated capability set does not grant it` | Adapter behavior is never faked; the profile must have validated it |
+| `--tool-call-parser hermes`, profile grants no parsers | `--tool-call-parser: profile "<id>" does not support capability "toolCallParser:hermes": the profile's validated capability set does not grant it` | A parser is code and behavior, not a forwarded string |
+| `--speculative-config '{"method":"ngram"}'` | `--speculative-config: profile "<id>" does not support capability "speculativeDecoding": …` | Speculation is not simulated by recording a longer output |
+| `--kv-events-config '{"replay_endpoint":"tcp://0.0.0.0:5557"}'` | `--kv-events-config: profile "<id>" does not support capability "kvEventReplay": …` | A router cannot be told replay exists when the engine has no replay responder |
+| `--kv-events-config '{"enable_kv_cache_events":true,…}'`, profile `trace.kvEvents` false | `--kv-events-config: profile "<id>" records no KV-cache events (trace.kvEvents is false), so the simulator cannot publish the stream the workload configures` | No empty event stream that a router quietly indexes as "no cache" |
+| `--kv-events-config` with `"buffer_steps": 8` | `--kv-events-config: bufferSteps is not supported: the simulator's publisher has no step buffer to configure` | Publisher tuning is not silently ignored |
+| `--kv-events-config` with an unknown field | `--kv-events-config: field "<name>" is not an event-publisher setting this operator can apply` | A misspelled or newer field cannot be dropped on the floor |
+| `--gpu-memory-utilization 0.9`, profile declares no `coverage.kvMemoryConversion` | `gpuMemoryUtilization 0.9 is not authorized: profile "<id>" does not declare coverage.kvMemoryConversion, so simulated KV capacity cannot be derived from a memory fraction` | Cache capacity is never inferred from a percentage |
+| `--max-num-seqs 512`, `coverage.maxNumSeqs.max = 128` | `maxNumSeqs 512 is not authorized: profile "<id>" does not declare … (an absent coverage entry is not permission)`, or a violated-range message when the entry exists | A recording cannot vouch for a concurrency it never saw |
+| `--max-model-len 131072`, `coverage.maxModelLen.max = 32768` | Rejected as an increase beyond coverage | The frontend and the simulator would advertise a length no recording supports |
+| `--max-model-len` unset, profile declares no bound | `the workload does not set a maximum model length and profile "<id>" declares no coverage.maxModelLen, so no authorized bound exists; declare the setting or extend the profile coverage` | No invented model length |
+| `--tensor-parallel-size 2` with a 1-GPU request | Rejected: the requested device count and the recorded topology disagree | Synthetic devices are not multiplied into engines |
+| `--enable-chunked-prefill` vs a profile recorded without it | `the workload asks for chunked prefill true but profile "<id>" was recorded with it false: the recorded timing and cache representation cannot serve the other mode` | Timing is not borrowed across execution modes |
+| `--scheduling-policy ltr` | `--scheduling-policy: policy "ltr" is not supported: the simulator implements FCFS and priority only` | Only scheduling the simulator models is accepted |
+| Profile with `trace.latencyModel` false | `profile "<id>" records no latency model: serving would fall back to synthetic timing, which the policy forbids` | Timing is never invented |
+| Inference port collides with the handshake/control/KV-event port | `the <a> port <n> collides with the <b> port in the same Pod network namespace; one of them must be changed` | A Pod that could never work is not admitted |
+| `--uds /tmp/vllm.sock` | `--uds: a Unix-domain-socket server has no TCP endpoint, so kubelet probes, llm-d discovery, and the supervisor's readiness input cannot reach it; serve on the inference port instead` | A workload is never admitted into a state where readiness can never pass |
+| `--headless` | `--headless: a headless server exposes no HTTP API, so readiness, probes, and llm-d discovery cannot pass; only a serving workload can be simulated` | Same |
+| `--skip-tokenizer-init` | `--skip-tokenizer-init: the frontend renders prompts and streams tokens, so it must load the tokenizer: a skipped tokenizer cannot serve requests` | Rendering is not silently disabled |
+| `--tool-parser-plugin my.module` | `--tool-parser-plugin: a tool-parser plugin is code that must exist in the operator-provided frontend image; arbitrary plugin modules are not loaded` | Arbitrary modules are never loaded |
+| `--api-key` supplied through a `--config` file | `--api-key: an API key supplied through the config file cannot be re-emitted without retaining its value; pass it with --api-key on the command line or with the VLLM_API_KEY environment variable` | The key never enters a plan, annotation, status, log, or event |
+| A flag the resolver does not know | `vllm: --some-new-flag=<value>: unknown flag; it is not part of the vLLM 0.33.0 command line` | New vLLM flags are rejected until someone adds a reviewed row; nothing introspects an image to guess a flag's meaning |
+| An unmodelled environment variable | `VLLM_SOME_NEW_SETTING: Unknown behavior-affecting settings: the variable can change vLLM or tokenizer behaviour, and its policy treatment is undefined` | An unrecognized environment setting cannot quietly change behavior |
+
+Every message keeps that shape: the setting, then the reason. None contains a
+credential value; a secret-bearing setting is reported by name with
+`<redacted>` in place of its value. A workload that passes produces no rejection
+at all — the plan records what was accepted instead, including a warning wherever
+a behavior is not reproduced exactly.
+
+`go test ./internal/translator/...` and `go test ./internal/vllm/...` assert these
+shapes at the packages' public interfaces.

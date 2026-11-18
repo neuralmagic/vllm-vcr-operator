@@ -1,0 +1,120 @@
+# The same llm-d modelserver, configured to publish live KV-cache events.
+#
+# This variant adds the one thing prefix-cache routing needs and the base fixture
+# does not configure: `--kv-events-config`. llm-d's precise-prefix-cache producer
+# subscribes to a ZMQ publisher and indexes block hashes per pod, so without
+# events the router can only score by queue and cache utilisation.
+#
+# Apply either this fixture or mock-prefix-cache-deployment.yaml, not both: they
+# select the same llm-d labels, so two Deployments with the same selector would
+# fight over the same pods.
+#
+# Two conditions make this fixture attenable, and both are rejections rather than
+# best-effort behaviour when missing:
+#
+#   1. the selected profile records trace.kvEvents = true, because the operator
+#      refuses to configure a publisher whose stream the recording cannot produce;
+#   2. `topic` is left out on purpose. The operator derives the llm-d topic form
+#      `kv@<pod identity>@<model>` from the Pod, which a flag literal in a
+#      workload manifest cannot express.
+#
+# What is *not* available: KV-event replay. The pinned simulator publishes live
+# events and its ready response always reports replay_endpoint null, so a consumer
+# that loses the event window cannot be re-synchronized from the engine. See
+# docs/limitations.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-prefix-cache-kv-events
+  namespace: vllm-vcr-simulated
+  labels:
+    llm-d.ai/guide: precise-prefix-cache-routing
+    llm-d.ai/model: qwen3-0-6b
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      llm-d.ai/guide: precise-prefix-cache-routing
+      llm-d.ai/model: qwen3-0-6b
+  template:
+    metadata:
+      labels:
+        llm-d.ai/guide: precise-prefix-cache-routing
+        llm-d.ai/model: qwen3-0-6b
+        llm-d.ai/inference-serving: "true"
+    spec:
+      serviceAccountName: mock-pc-sa
+      containers:
+        - name: modelserver
+          image: vllm/vllm-openai:v0.33.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - vllm
+            - serve
+          args:
+            - Qwen/Qwen3-0.6B
+            - --served-model-name=Qwen/Qwen3-0.6B
+            - --tensor-parallel-size=1
+            - --max-model-len=32768
+            - --max-num-seqs=16
+            - --enable-prefix-caching
+            - --kv-events-config={"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5556"}
+          env:
+            - name: MODEL
+              value: Qwen/Qwen3-0.6B
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: HF_HOME
+              value: /models
+            - name: HF_HUB_DISABLE_XET
+              value: "1"
+          ports:
+            - name: modelserver
+              containerPort: 8000
+              protocol: TCP
+            - name: kv-events
+              containerPort: 5556
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: modelserver
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: modelserver
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /v1/models
+              port: modelserver
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+              nvidia.com/gpu: "1"
+            limits:
+              memory: 4Gi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+      volumes:
+        - name: model-cache
+          emptyDir:
+            sizeLimit: 20Gi

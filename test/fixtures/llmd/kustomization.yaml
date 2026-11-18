@@ -1,0 +1,14 @@
+# The llm-d modelserver fixtures.
+#
+# The base resource is the fixture every acceptance path uses. The kv-events
+# variant selects the same llm-d labels, so it is a separate resource a caller
+# applies *instead of* the base, never together with it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: vllm-vcr-simulated
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - mock-prefix-cache-deployment.yaml

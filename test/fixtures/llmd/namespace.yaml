@@ -1,0 +1,11 @@
+# Workload namespace for the integration fixtures.
+#
+# The operator never creates workload namespaces: a real E2E harness brings its
+# own. This fixture exists so the manifests can be applied as a self-contained
+# set with one command.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vllm-vcr-simulated
+  labels:
+    app.kubernetes.io/name: vllm-vcr-simulated

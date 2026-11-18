@@ -1,0 +1,62 @@
+# The singleton SimulationEnvironment for the H200 profiles.
+#
+# This is the fixture form of config/samples/vcr_v1alpha1_simulationenvironment.yaml:
+# the same configuration, with a placeholder profile image that is pinned by
+# digest, because every admitted Pod is pinned by digest and a tag would hide the
+# fact that no profile release exists yet.
+#
+# PLACEHOLDER DIGEST: sha256:0000… does not exist. A real deployment replaces the
+# whole `image:` value with a digest-pinned profile reference produced by the
+# profile repository (docs/profile-contract.md). Nothing in this repository
+# publishes one, and no run in this repository has pulled one.
+#
+# Rules the CRD enforces, mirrored here:
+#   - the name must be "default" (CEL rule on the CRD)
+#   - spec.simulationNodes.nodeSelector must select at least one label; only
+#     matching nodes receive the synthetic GPU device plugin
+#   - spec.runtime sizes the *real* CPU and memory of the injected containers and
+#     replaces the original GPU-server sizing; it must not request
+#     nvidia.com/gpu, because only the workload's own container holds the
+#     synthetic allocation
+apiVersion: vcr.opendatahub-io/v1alpha1
+kind: SimulationEnvironment
+metadata:
+  name: default
+spec:
+  simulationNodes:
+    nodeSelector:
+      vcr.opendatahub-io/simulation: "true"
+    tolerations:
+      - key: vcr.opendatahub-io/simulation
+        operator: Exists
+        effect: NoSchedule
+  # Scheduling quantity, not a performance multiplier: 8 synthetic H200s per
+  # selected node, and a Pod requesting 2 devices consumes 2 of them.
+  devicesPerNode: 8
+  gpuType: H200
+  profiles:
+    - image: quay.io/opendatahub/vllm-vcr-profiles@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  imagePullSecrets: []
+  runtime:
+    frontend:
+      requests:
+        cpu: "1"
+        memory: 2Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    backend:
+      requests:
+        cpu: "2"
+        memory: 2Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+    provisioner:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  logLevel: info
