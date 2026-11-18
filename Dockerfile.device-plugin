@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+# Synthetic GPU device plugin image: advertises nvidia.com/gpu on simulation
+# nodes without any NVIDIA driver, device file, or runtime.
+#
+# The DaemonSet that runs this image is created by the operator (internal/
+# controller), not by config/, so this Dockerfile only produces the binary and a
+# minimal runtime.
+#
+# Multi-arch friendly: the builder cross-compiles for TARGETOS/TARGETARCH.
+#
+# Build args (declared before the first FROM so they can be used in FROM lines):
+#   GO_VERSION  Go toolchain; must satisfy go.mod (default 1.26)
+#   BASE_IMAGE  runtime base (default gcr.io/distroless/static:nonroot)
+#   LD_FLAGS    extra linker flags (default empty)
+#
+# Runtime notes:
+#   - The plugin creates a socket in the kubelet device-plugin directory
+#     (/var/lib/kubelet/device-plugins by default), a root-owned hostPath. The
+#     operator-rendered DaemonSet must grant write access (uid or fsGroup); see
+#     config/README.md ("Images").
+#   - No NVIDIA capability, device, or runtime class is required or wanted. If the
+#     socket directory is not writable the plugin exits non-zero and crash-loops
+#     visibly instead of advertising nothing.
+ARG GO_VERSION=1.26
+ARG BASE_IMAGE=gcr.io/distroless/static:nonroot
+
+FROM --platform=${BUILDPLATFORM} golang:${GO_VERSION} AS builder
+ARG TARGETOS
+ARG TARGETARCH
+ARG LD_FLAGS
+WORKDIR /src
+ENV CGO_ENABLED=0
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
+    go build -trimpath -ldflags="-s -w ${LD_FLAGS}" -o /out/vllm-vcr-device-plugin ./cmd/deviceplugin
+
+FROM ${BASE_IMAGE}
+COPY --from=builder /out/vllm-vcr-device-plugin /vllm-vcr-device-plugin
+ENTRYPOINT ["/vllm-vcr-device-plugin"]
