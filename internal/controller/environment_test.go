@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -675,5 +676,111 @@ func TestReconcileIgnoresADeletedEnvironment(t *testing.T) {
 	}
 	if len(daemonSets.Items) != 0 {
 		t.Errorf("found %d DaemonSets without an environment, want none", len(daemonSets.Items))
+	}
+}
+
+// conflictClient wraps a client and fails status writes on SimulationEnvironment
+// objects with a conflict, the way a concurrent writer does. failures is the
+// number of updates to fail: 1 models one race, 0 (or a huge number) models a
+// writer that never stops.
+type conflictClient struct {
+	client.Client
+	failures int
+	mu       sync.Mutex
+	attempts int
+}
+
+func (c *conflictClient) Status() client.SubResourceWriter {
+	return &conflictStatusWriter{SubResourceWriter: c.Client.Status(), owner: c}
+}
+
+func (c *conflictClient) attempt() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.attempts++
+	return c.attempts <= c.failures
+}
+
+func (c *conflictClient) attemptCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.attempts
+}
+
+type conflictStatusWriter struct {
+	client.SubResourceWriter
+	owner *conflictClient
+}
+
+func (w *conflictStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+	if _, ok := obj.(*vcrv1alpha1.SimulationEnvironment); ok && w.owner.attempt() {
+		return apierrors.NewConflict(
+			vcrv1alpha1.GroupVersion.WithResource("simulationenvironments").GroupResource(),
+			obj.GetName(), errors.New("the object has been modified; apply your changes to the latest version"))
+	}
+	return w.SubResourceWriter.Update(ctx, obj, opts...)
+}
+
+// TestReconcileRetriesAConflictingStatusUpdate asserts that a status conflict is
+// re-read and retried inside one reconcile instead of being handed to the work
+// queue: the environment must be published by the reconcile that hit the conflict.
+func TestReconcileRetriesAConflictingStatusUpdate(t *testing.T) {
+	env := testEnvironment()
+	reg := newFakeRegistry()
+	reg.resolve("registry.test/profile:1", "sha256:"+strings.Repeat("a", 64), contractMetadata(t, "profile-a", "model-a"))
+	env.Spec.Profiles = []vcrv1alpha1.ProfileSource{{Image: "registry.test/profile:1"}}
+	reconciler, c, _ := environmentReconciler(t, reg, env)
+
+	conflicting := &conflictClient{Client: c, failures: 1}
+	reconciler.Client = conflicting
+
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}}
+	result, err := reconciler.Reconcile(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Reconcile returned error for a single status conflict, want a retried write: %v", err)
+	}
+	if result.RequeueAfter != 0 {
+		t.Errorf("RequeueAfter = %s, want no requeue: the conflict retry published the status", result.RequeueAfter)
+	}
+	if attempts := conflicting.attemptCount(); attempts != 2 {
+		t.Errorf("status update attempts = %d, want 2 (one conflict, one success)", attempts)
+	}
+
+	stored := &vcrv1alpha1.SimulationEnvironment{}
+	if err := c.Get(context.Background(), request.NamespacedName, stored); err != nil {
+		t.Fatalf("get the reconciled environment: %v", err)
+	}
+	if len(stored.Status.Profiles) != 1 {
+		t.Fatalf("status.profiles = %+v, want the resolved profile", stored.Status.Profiles)
+	}
+	if metadata := stored.Status.Profiles[0].Metadata; !strings.Contains(metadata, `"profile-a"`) {
+		t.Errorf("status.profiles[0].metadata = %q, want the resolved profile-a document", metadata)
+	}
+	if condition := conditionOf(t, stored, controller.ConditionProfilesReconciled); condition.Status != metav1.ConditionTrue {
+		t.Errorf("ProfilesReconciled = %s, want True after the retried write", condition.Status)
+	}
+}
+
+// TestReconcileRequeuesWhenStatusRetriesAreExhausted asserts the fallback: when a
+// concurrent writer never yields, the reconcile gives up retrying and asks the
+// work queue to try again rather than reporting a hard error.
+func TestReconcileRequeuesWhenStatusRetriesAreExhausted(t *testing.T) {
+	env := testEnvironment()
+	reg := newFakeRegistry()
+	reconciler, c, _ := environmentReconciler(t, reg, env)
+
+	conflicting := &conflictClient{Client: c, failures: 1 << 30}
+	reconciler.Client = conflicting
+
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}}
+	result, err := reconciler.Reconcile(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Reconcile returned error after the retry budget, want a requeue: %v", err)
+	}
+	if result.RequeueAfter != 30*time.Second {
+		t.Errorf("RequeueAfter = %s, want the configured 30s retry so a persistent conflict is retried", result.RequeueAfter)
+	}
+	if attempts := conflicting.attemptCount(); attempts < 2 {
+		t.Errorf("status update attempts = %d, want the retry budget to be spent before requeueing", attempts)
 	}
 }
