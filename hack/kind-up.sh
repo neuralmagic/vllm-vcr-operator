@@ -1,32 +1,38 @@
 #!/usr/bin/env bash
-# kind-up.sh creates an optional local kind cluster for trying the operator.
+# kind-up.sh creates the two-node kind cluster the acceptance suite uses.
 #
-# kind runs Kubernetes nodes as Docker containers, so it needs a reachable Docker
-# daemon (or a Docker-compatible runtime). This script fails with an explicit
-# message instead of silently doing nothing when that prerequisite is missing.
+# The cluster has one control-plane node and one worker node so that placement on
+# a simulation node is observable: the worker is the node the suite labels
+#   vcr.opendatahub-io/simulation=true
+# and the control-plane node must never receive the synthetic device plugin.
+#
+# kind runs Kubernetes nodes as containers, so it needs a container runtime. This
+# script uses Docker when its daemon is reachable and rootless podman otherwise
+# (KIND_EXPERIMENTAL_PROVIDER=podman), and fails with an explicit message when
+# neither works instead of silently doing nothing.
 #
 # Usage:
-#   hack/kind-up.sh [--name NAME] [--delete] [--no-images]
+#   hack/kind-up.sh [--name NAME] [--delete] [--force] [--no-label]
 #
-#   --name NAME   kind cluster name (default: vllm-vcr-operator)
+#   --name NAME   kind cluster name (default: vcr-e2e)
 #   --delete      delete the cluster and exit
-#   --no-images   skip loading locally built images into the cluster
+#   --force       delete and recreate the cluster even if it exists
+#   --no-label    do not label the worker as a simulation node
 #
-# Images are loaded from the same VCR_* references the manager Deployment uses
-# (config/manager/manager.yaml) when they exist locally:
-#   VCR_FRONTEND_IMAGE, VCR_BACKEND_IMAGE, VCR_DEVICE_PLUGIN_IMAGE,
-#   VCR_SUPERVISOR_IMAGE, VCR_MANAGER_IMAGE
+# After the cluster exists, load the images with:
+#   hack/images.sh --build --stub --load
+#
+# Images are loaded by hack/images.sh, not by this script: `kind load` does not
+# work with the podman provider (see test/cluster/README.md).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
-
-cluster="vllm-vcr-operator"
+cluster="vcr-e2e"
 delete=false
-load_images=true
+force=false
+label=true
 
 usage() {
-  sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -39,8 +45,12 @@ while [[ $# -gt 0 ]]; do
       delete=true
       shift
       ;;
-    --no-images)
-      load_images=false
+    --force)
+      force=true
+      shift
+      ;;
+    --no-label)
+      label=false
       shift
       ;;
     -h | --help)
@@ -60,63 +70,84 @@ command -v kind >/dev/null || {
   exit 1
 }
 
+# Resolve the kind provider: Docker if its daemon answers, podman otherwise.
+provider_args=()
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  provider=docker
+elif command -v podman >/dev/null 2>&1; then
+  provider=podman
+  export KIND_EXPERIMENTAL_PROVIDER=podman
+else
+  echo "kind needs a container runtime: neither a running Docker daemon nor podman is available." >&2
+  echo "Install podman (rootless podman 5.x works) or start Docker." >&2
+  exit 1
+fi
+echo "kind provider: $provider"
+
 if [[ "$delete" == true ]]; then
-  kind delete cluster --name "$cluster"
+  if kind get clusters 2>/dev/null | grep -qx "$cluster"; then
+    kind delete cluster --name "$cluster"
+  else
+    echo "kind cluster '$cluster' does not exist"
+  fi
   exit 0
 fi
 
-# Fail clearly, not silently: kind needs a working container runtime.
-if ! command -v docker >/dev/null; then
-  echo "docker is not installed. kind needs a Docker-compatible runtime to host nodes." >&2
-  echo "Install Docker (or use a real cluster and 'hack/install.sh')." >&2
-  exit 1
-fi
-if ! docker info >/dev/null 2>&1; then
-  echo "the Docker daemon is not reachable; kind cannot create nodes." >&2
-  echo "Start Docker (or use a real cluster and 'hack/install.sh')." >&2
-  exit 1
+if kind get clusters 2>/dev/null | grep -qx "$cluster"; then
+  if [[ "$force" == true ]]; then
+    echo "deleting existing kind cluster '$cluster'"
+    kind delete cluster --name "$cluster"
+  else
+    echo "kind cluster '$cluster' already exists: reusing it"
+  fi
 fi
 
-if kind get clusters 2>/dev/null | grep -qx "$cluster"; then
-  echo "kind cluster '$cluster' already exists"
-else
-  echo "creating kind cluster '$cluster'"
-  kind create cluster --name "$cluster" --wait 120s
+if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "$workdir"' EXIT
+  cat >"$workdir/cluster.yaml" <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: $cluster
+nodes:
+  # Two nodes so that placement is observable: only the worker is labelled as a
+  # simulation node, so a Pod that schedules on the control-plane node would be a
+  # visible placement bug rather than a hidden one.
+  - role: control-plane
+  - role: worker
+    labels:
+      vcr.opendatahub-io/simulation: "true"
+EOF
+  echo "creating kind cluster '$cluster' (control-plane + worker)"
+  kind create cluster --config "$workdir/cluster.yaml" --wait 120s
 fi
 
 kubectl config use-context "kind-$cluster" >/dev/null
 
-if [[ "$load_images" == true ]]; then
-  loaded=0
-  for var in VCR_MANAGER_IMAGE VCR_FRONTEND_IMAGE VCR_BACKEND_IMAGE \
-    VCR_DEVICE_PLUGIN_IMAGE VCR_SUPERVISOR_IMAGE; do
-    image="${!var:-}"
-    if [[ -z "$image" ]]; then
-      continue
-    fi
-    if docker image inspect "$image" >/dev/null 2>&1; then
-      echo "loading $var=$image into the cluster"
-      kind load docker-image --name "$cluster" "$image"
-      loaded=$((loaded + 1))
-    else
-      echo "skipping $var=$image: not present in the local Docker image store"
-    fi
-  done
-  if [[ $loaded -eq 0 ]]; then
-    echo "no local images were loaded; the operator will pull the placeholders"
-    echo "from config/manager/manager.yaml unless you patch them (see config/README.md)"
+if [[ "$label" == true ]]; then
+  # kind's `labels:` node field is applied at node creation; re-apply so a reused
+  # cluster is labelled too (idempotent).
+  worker="$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  if [[ -n "$worker" ]]; then
+    kubectl label node "$worker" vcr.opendatahub-io/simulation=true --overwrite >/dev/null
+    echo "labelled $worker as a simulation node (vcr.opendatahub-io/simulation=true)"
+  else
+    echo "warning: no worker node found; the simulation node label was not applied" >&2
   fi
 fi
 
+kubectl wait --for=condition=Ready nodes --all --timeout=120s >/dev/null
+
 cat <<EOF
 
-Cluster 'kind-$cluster' is ready.
+Cluster 'kind-$cluster' is ready (nodes: $(kubectl get nodes --no-headers | wc -l | tr -d ' ')).
 
 Next steps:
-  1. label a node so the SimulationEnvironment selects it:
-       kubectl label node $cluster-control-plane vcr.opendatahub-io/simulation=true
-  2. install the operator:
-       hack/install.sh --overlay config/overlays/local --with-sample
+  1. build and load the images (never requires Docker):
+       hack/images.sh --build --stub --load
+  2. run the acceptance suite (it installs the operator, the webhook certificates,
+     and a test TLS registry itself):
+       make test-cluster
   3. tear down:
        hack/kind-up.sh --name $cluster --delete
 EOF
