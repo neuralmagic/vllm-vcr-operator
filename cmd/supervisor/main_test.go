@@ -1,7 +1,8 @@
 package main
 
 import (
-	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +37,15 @@ func TestParseConfigUsesDefaults(t *testing.T) {
 	if cfg.HealthAddress != supervisor.DefaultHealthAddress {
 		t.Errorf("health address = %q, want %q", cfg.HealthAddress, supervisor.DefaultHealthAddress)
 	}
+	if got, want := cfg.FrontendHealthURL, "http://127.0.0.1:8000/health"; got != want {
+		t.Errorf("frontend health URL = %q, want the contract default %q", got, want)
+	}
+	if got, want := cfg.BackendHealthURL, "http://127.0.0.1:8001/stats"; got != want {
+		t.Errorf("backend health URL = %q, want the contract default %q", got, want)
+	}
+	if cfg.HealthPollInterval != supervisor.DefaultHealthPollInterval {
+		t.Errorf("health poll interval = %s, want %s", cfg.HealthPollInterval, supervisor.DefaultHealthPollInterval)
+	}
 	if cfg.BackendLossGrace != supervisor.DefaultBackendLossGrace {
 		t.Errorf("backend loss grace = %s, want %s", cfg.BackendLossGrace, supervisor.DefaultBackendLossGrace)
 	}
@@ -46,13 +56,22 @@ func TestParseConfigUsesDefaults(t *testing.T) {
 
 func TestParseConfigReadsRuntimeLayoutEnv(t *testing.T) {
 	env := map[string]string{
-		"VCR_HANDSHAKE_ADDRESS": "tcp://127.0.0.1:29551",
-		"VCR_READY_FILE":        "/var/run/vcr/ready",
-		"VCR_SHUTDOWN_TIMEOUT":  "7",
+		"VCR_HANDSHAKE_ADDRESS":    "tcp://127.0.0.1:29551",
+		"VCR_FRONTEND_HEALTH_URL":  "http://127.0.0.1:8200/health",
+		"VCR_BACKEND_HEALTH_URL":   "http://127.0.0.1:8001/stats",
+		"VCR_READY_FILE":           "/var/run/vcr/ready",
+		"VCR_SHUTDOWN_TIMEOUT":     "7",
+		"VCR_HEALTH_POLL_INTERVAL": "",
 	}
 	cfg, err := parseConfig([]string{"python", "-m", "vllm.serve"}, getenvFrom(env), os.Stderr)
 	if err != nil {
 		t.Fatalf("parseConfig: %v", err)
+	}
+	if cfg.FrontendHealthURL != "http://127.0.0.1:8200/health" {
+		t.Errorf("frontend health URL = %q, want the VCR_FRONTEND_HEALTH_URL value", cfg.FrontendHealthURL)
+	}
+	if cfg.BackendHealthURL != "http://127.0.0.1:8001/stats" {
+		t.Errorf("backend health URL = %q, want the VCR_BACKEND_HEALTH_URL value", cfg.BackendHealthURL)
 	}
 	if cfg.HandshakeAddress != "tcp://127.0.0.1:29551" {
 		t.Errorf("handshake address = %q, want the VCR_HANDSHAKE_ADDRESS value", cfg.HandshakeAddress)
@@ -77,7 +96,9 @@ func TestFlagsOverrideEnv(t *testing.T) {
 		"--shutdown-timeout", "1200ms",
 		"--health-address", "127.0.0.1:18082",
 		"--backend-loss-grace", "900ms",
-		"--poll-interval", "25ms",
+		"--frontend-health-url", "http://127.0.0.1:8300/health",
+		"--backend-health-url", "http://127.0.0.1:8301/stats",
+		"--health-poll-interval", "25ms",
 		"--", "python", "-m", "vllm.serve",
 	}
 	cfg, err := parseConfig(args, getenvFrom(env), os.Stderr)
@@ -99,8 +120,14 @@ func TestFlagsOverrideEnv(t *testing.T) {
 	if cfg.BackendLossGrace != 900*time.Millisecond {
 		t.Errorf("backend loss grace = %s, want 900ms", cfg.BackendLossGrace)
 	}
-	if cfg.PollInterval != 25*time.Millisecond {
-		t.Errorf("poll interval = %s, want 25ms", cfg.PollInterval)
+	if cfg.HealthPollInterval != 25*time.Millisecond {
+		t.Errorf("health poll interval = %s, want 25ms", cfg.HealthPollInterval)
+	}
+	if cfg.FrontendHealthURL != "http://127.0.0.1:8300/health" {
+		t.Errorf("frontend health URL = %q, want the flag value", cfg.FrontendHealthURL)
+	}
+	if cfg.BackendHealthURL != "http://127.0.0.1:8301/stats" {
+		t.Errorf("backend health URL = %q, want the flag value", cfg.BackendHealthURL)
 	}
 }
 
@@ -135,22 +162,27 @@ func TestBinaryShutsDownOnSIGTERM(t *testing.T) {
 		t.Fatalf("build cmd/supervisor: %v", err)
 	}
 
-	// A loopback listener standing in for the registered simulator.
-	engine, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen on engine address: %v", err)
-	}
-	defer engine.Close()
+	// A frontend health endpoint and a simulator control API, both answering.
+	frontend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer frontend.Close()
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
 
 	readyFile := filepath.Join(t.TempDir(), "runtime", "ready")
 	cmd := exec.Command(bin,
 		"--health-address", "127.0.0.1:0",
-		"--handshake-address", "tcp://"+engine.Addr().String(),
-		"--poll-interval", "10ms",
+		"--health-poll-interval", "10ms",
 		"--shutdown-timeout", "2s",
 		"--", "/bin/sh", "-c", `trap 'exit 0' TERM
 while true; do sleep 0.01; done`)
-	cmd.Env = append(os.Environ(), "VCR_READY_FILE="+readyFile)
+	cmd.Env = append(os.Environ(),
+		"VCR_READY_FILE="+readyFile,
+		"VCR_FRONTEND_HEALTH_URL="+frontend.URL,
+		"VCR_BACKEND_HEALTH_URL="+backend.URL)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start supervisor binary: %v", err)

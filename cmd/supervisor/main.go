@@ -2,10 +2,13 @@
 // simulated model-server Pod.
 //
 // It runs the Python vLLM frontend as its only long-lived child, publishes
-// readiness that combines frontend liveness with engine registration, and
-// coordinates termination so that draining tests observe controlled shutdown.
-// The simulator lives in its own container and is supervised by kubelet; the
-// supervisor only observes its registration and never restarts it.
+// readiness that combines frontend process liveness with the frontend's health
+// endpoint and the simulator's control API, and coordinates termination so that
+// draining tests observe controlled shutdown. The engine-core handshake address is
+// passed to the frontend but never probed: the frontend binds that socket, so a
+// connection to it says nothing about whether an engine is registered. The
+// simulator lives in its own container and is supervised by kubelet; the
+// supervisor only observes its control API and never restarts it.
 //
 // Usage:
 //
@@ -13,9 +16,11 @@
 //
 // Environment fallbacks (see docs/contracts/runtime-layout.md):
 //
-//	VCR_HANDSHAKE_ADDRESS  engine-core handshake endpoint (default tcp://127.0.0.1:29550)
-//	VCR_READY_FILE         readiness marker file (default /tmp/vcr-runtime/ready)
-//	VCR_SHUTDOWN_TIMEOUT   graceful shutdown budget in seconds (default 0, immediate)
+//	VCR_HANDSHAKE_ADDRESS     engine-core handshake endpoint (default tcp://127.0.0.1:29550)
+//	VCR_FRONTEND_HEALTH_URL   frontend health URL (default http://127.0.0.1:8000/health)
+//	VCR_BACKEND_HEALTH_URL    simulator control URL (default http://127.0.0.1:8001/stats)
+//	VCR_READY_FILE            readiness marker file (default /tmp/vcr-runtime/ready)
+//	VCR_SHUTDOWN_TIMEOUT      graceful shutdown budget in seconds (default 0, immediate)
 package main
 
 import (
@@ -78,6 +83,14 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (s
 	if v := getenv("VCR_HANDSHAKE_ADDRESS"); v != "" {
 		handshakeDefault = v
 	}
+	frontendHealthDefault := supervisor.DefaultFrontendHealthURL
+	if v := getenv("VCR_FRONTEND_HEALTH_URL"); v != "" {
+		frontendHealthDefault = v
+	}
+	backendHealthDefault := supervisor.DefaultBackendHealthURL
+	if v := getenv("VCR_BACKEND_HEALTH_URL"); v != "" {
+		backendHealthDefault = v
+	}
 	readyDefault := supervisor.DefaultReadyFile
 	if v := getenv("VCR_READY_FILE"); v != "" {
 		readyDefault = v
@@ -94,7 +107,11 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (s
 	fs := flag.NewFlagSet("vcr-supervisor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	handshake := fs.String("handshake-address", handshakeDefault,
-		"engine-core handshake endpoint observed for engine registration (tcp://host:port)")
+		"engine-core handshake endpoint passed to the frontend; never probed for readiness (tcp://host:port)")
+	frontendHealth := fs.String("frontend-health-url", frontendHealthDefault,
+		"frontend health URL that must answer 2xx for the Pod to be ready")
+	backendHealth := fs.String("backend-health-url", backendHealthDefault,
+		"simulator control API URL that must answer 2xx for the Pod to be ready")
 	readyFile := fs.String("ready-file", readyDefault,
 		"readiness marker file, written atomically while ready and removed otherwise")
 	healthAddress := fs.String("health-address", supervisor.DefaultHealthAddress,
@@ -103,16 +120,19 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (s
 		"how long the engine may stay unreachable before the frontend is terminated")
 	shutdownTimeout := fs.Duration("shutdown-timeout", shutdownDefault,
 		"graceful shutdown budget for the frontend; 0 terminates immediately")
-	pollInterval := fs.Duration("poll-interval", supervisor.DefaultPollInterval,
-		"how often engine registration is probed")
+	healthPollInterval := fs.Duration("health-poll-interval", supervisor.DefaultHealthPollInterval,
+		"how often each health input is probed")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: vcr-supervisor [flags] -- <frontend command> [args...]
 
-Runs the vLLM frontend and reports readiness only while the engine is registered.
+Runs the vLLM frontend and reports readiness only while the frontend is alive, its
+health URL answers 2xx, and the simulator control API answers 2xx. The engine-core
+handshake address is passed to the frontend and is not a readiness signal.
 Without --, the first non-flag argument starts the frontend command.
 
-Environment fallbacks: VCR_HANDSHAKE_ADDRESS, VCR_READY_FILE, VCR_SHUTDOWN_TIMEOUT
-(seconds). Flags take precedence.
+Environment fallbacks: VCR_HANDSHAKE_ADDRESS, VCR_FRONTEND_HEALTH_URL,
+VCR_BACKEND_HEALTH_URL, VCR_READY_FILE, VCR_SHUTDOWN_TIMEOUT (seconds).
+Flags take precedence.
 
 Flags:
 `)
@@ -129,14 +149,16 @@ Flags:
 	}
 
 	return supervisor.Config{
-		Command:          command,
-		Env:              os.Environ(),
-		HandshakeAddress: *handshake,
-		ReadyFile:        *readyFile,
-		HealthAddress:    *healthAddress,
-		BackendLossGrace: *backendLossGrace,
-		ShutdownTimeout:  *shutdownTimeout,
-		PollInterval:     *pollInterval,
+		Command:            command,
+		Env:                os.Environ(),
+		HandshakeAddress:   *handshake,
+		FrontendHealthURL:  *frontendHealth,
+		BackendHealthURL:   *backendHealth,
+		ReadyFile:          *readyFile,
+		HealthAddress:      *healthAddress,
+		BackendLossGrace:   *backendLossGrace,
+		ShutdownTimeout:    *shutdownTimeout,
+		HealthPollInterval: *healthPollInterval,
 	}, nil
 }
 
