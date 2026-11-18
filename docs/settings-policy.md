@@ -16,7 +16,15 @@ A workload is translated in four steps, and each step can only reject more:
 1. **Resolve.** `internal/vllm` reports the workload's effective vLLM 0.33.0
    configuration and, for every setting, whether the *workload* set it (CLI, config
    file, or environment) or the value is a vLLM default. Defaults never trigger a
-   policy decision: a resolved default is not a workload request.
+   policy decision: a resolved default is not a workload request. Both spellings of a
+   boolean setting resolve: `--enable-prefix-caching` is an explicit `true` and
+   `--no-enable-prefix-caching` (or the release's `--disable-prefix-caching` alias) is
+   an explicit `false` attributed to the setting's canonical name, which is what makes
+   "preserve enabled/disabled semantics" expressible at all. A command line that names
+   both spellings resolves the way vLLM 0.33.0's argparse does — the last occurrence
+   wins — because the resolver reports what the release would do rather than
+   inventing a conflict rule; the precedence between layers is unchanged, so a CLI
+   negation still overrides a config file or environment value.
 2. **Apply the table.** Every setting the workload set is looked up here. A setting
    with no row is rejected as an unknown behavior-affecting setting. Every row yields
    one disposition, and dispositions that accept may forward the setting to the
@@ -523,11 +531,11 @@ available flag, is the authority.
   `VCR_BACKEND_HEALTH_URL`). A supervisor build that does not read them falls back to
   its own defaults; the plan already sets the correct values, so the fallback is only a
   fidelity gap for non-default inference ports.
-- The resolver in `internal/vllm` accepts only the affirmative spelling of boolean
-  flags, so an explicit `false` (for example `--no-enable-prefix-caching`) is rejected
-  as an unknown flag before this policy runs. The combination checks handle the case
-  (a workload cannot currently ask for the opposite cache mode), but expressing it
-  awaits a resolver change.
+- A negated spelling is derived from the modelled setting, so `--no-<flag>` is
+  accepted only where the operator models `<flag>`. A negation whose positive
+  counterpart is not modelled (`--no-use-tqdm`) and any spelling the release does not
+  register at all stay rejections that name the spelling; nothing is accepted as an
+  inert no-op.
 - `--kv-cache-memory-bytes` and `--gpu-memory-utilization` are authorized by
   `coverage.kvMemoryConversion`, but the metadata contract records only the resulting
   `cache.kvBlocks`, so the simulated capacity is the recorded value rather than a

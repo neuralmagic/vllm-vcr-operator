@@ -78,7 +78,7 @@ func (p *parser) applyConfigFileLayer(rawPath string) {
 		p.errs = append(p.errs, *rej)
 		return
 	}
-	tokens, rej := parseAndEncodeConfigFile(content)
+	tokens, rej := p.encodeConfigFile(content)
 	if rej != nil {
 		p.errs = append(p.errs, *rej)
 		return

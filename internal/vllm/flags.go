@@ -81,8 +81,9 @@ type flagSpellings struct {
 }
 
 // flags is the modelled flag table. The canonical spelling of every entry is the
-// vLLM 0.33.0 long flag form; negated boolean spellings ("--no-x",
-// "--disable-x") are added automatically when vLLM 0.33.0 defines them.
+// vLLM 0.33.0 long flag form; the negated spellings of a boolean entry
+// ("--no-x", and the release's "--disable-x" alias) are derived from it by
+// negatedSpellings and registered alongside it.
 //
 // Anything outside this table is rejected by Resolve: either because it is not a
 // vLLM 0.33.0 flag at all, or because the operator does not model it and
@@ -242,9 +243,13 @@ func flags(cfg *Config) []flagSpec {
 	}
 }
 
-// negatedSpellings returns the spellings vLLM 0.33.0 may use to express "false"
-// for a boolean setting: "--no-<flag>" and, for "--enable-<x>" flags,
-// "--disable-<x>".
+// negatedSpellings returns the spellings vLLM 0.33.0 accepts for an explicit
+// "false" on a boolean setting: "--no-<flag>", which argparse's
+// BooleanOptionalAction registers for every long boolean option, and, for a
+// setting declared as "--enable-<x>", the release's "--disable-<x>" alias.
+//
+// The order is the preference order: the first spelling a caller can resolve is
+// the one used to express false.
 func negatedSpellings(setting string) []string {
 	base := strings.TrimPrefix(setting, "--")
 	out := []string{"--no-" + base}
