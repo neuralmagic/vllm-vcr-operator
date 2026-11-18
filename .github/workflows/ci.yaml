@@ -1,0 +1,101 @@
+# CI for vllm-vcr-operator: build/vet/unit tests, the envtest acceptance suite,
+# and manifest verification. Kept small on purpose: heavyweight E2E (real
+# cluster, real recorded profiles) is not runnable here.
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - integration
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+  # Pinned tool versions: manifests and CRDs are generated, so the generator is
+  # part of the contract.
+  CONTROLLER_GEN_VERSION: v0.16.5
+  KUSTOMIZE_VERSION: v5.8.1
+  YQ_VERSION: v4.53.3
+
+jobs:
+  build:
+    name: build, vet, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l . | grep -v '^vendor/' || true)"
+          if [ -n "$unformatted" ]; then
+            echo "these files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: build
+        run: go build ./...
+      - name: vet
+        run: go vet ./...
+      - name: unit tests
+        # make test-unit excludes test/e2e (needs envtest assets) and test/spike
+        # (needs real images).
+        run: make test-unit
+
+  test-e2e:
+    name: envtest acceptance suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: install setup-envtest
+        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+      - name: envtest suite
+        # test/e2e lands with its own ticket; until then this job proves the
+        # rest of the pipeline is green instead of failing on a missing package.
+        run: |
+          if [ -d test/e2e ]; then
+            make test-e2e
+          else
+            echo "test/e2e does not exist yet: envtest suite skipped"
+          fi
+
+  manifests:
+    name: manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: install controller-gen
+        run: |
+          go install sigs.k8s.io/controller-tools/cmd/controller-gen@${{ env.CONTROLLER_GEN_VERSION }}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: install kustomize
+        run: go install sigs.k8s.io/kustomize/kustomize/v5@${{ env.KUSTOMIZE_VERSION }}
+      - name: install yq
+        run: |
+          sudo curl -sSL -o /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/${{ env.YQ_VERSION }}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+      - name: verify manifests
+        run: hack/verify-manifests.sh
+      - name: verify the CRD is regenerated
+        # A stale config/crd/bases means the API changed without `make manifests`.
+        # Only the CRD is compared: config/rbac/role.yaml is regenerated from RBAC
+        # markers, and hack/verify-manifests.sh (above) checks the permission set
+        # the operator actually needs.
+        run: |
+          make manifests
+          git diff --exit-code -- config/crd
