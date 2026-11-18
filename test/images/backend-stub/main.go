@@ -247,7 +247,9 @@ func listenKVEvents(ctx context.Context, endpoint string, logger *log.Logger) er
 	if strings.TrimSpace(endpoint) == "" {
 		return nil
 	}
-	addr, err := listenAddress(endpoint)
+	// The KV-event endpoint is a ZMQ endpoint ("tcp://*:5556"), unlike the control
+	// address, so its scheme is expected and translated here.
+	addr, err := listenEndpoint(endpoint)
 	if err != nil {
 		return err
 	}
@@ -312,21 +314,49 @@ func (s *statsState) serve(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// listenAddress converts "tcp://0.0.0.0:8001", "tcp://*:5556", or "host:port"
-// into a net.Listen address.
+// listenEndpoint turns a ZMQ endpoint ("tcp://*:5556", "tcp://127.0.0.1:5557")
+// into a net.Listen address, mirroring the simulator's wildcard-binds rule.
+func listenEndpoint(endpoint string) (string, error) {
+	trimmed := strings.TrimSpace(endpoint)
+	if trimmed == "" {
+		return "", fmt.Errorf("no endpoint")
+	}
+	trimmed = strings.TrimPrefix(trimmed, "tcp://")
+	idx := strings.LastIndex(trimmed, ":")
+	if idx < 0 {
+		return "", fmt.Errorf("endpoint %q has no port", endpoint)
+	}
+	host, port := trimmed[:idx], trimmed[idx+1:]
+	if host == "*" || host == "" {
+		host = "0.0.0.0"
+	}
+	if _, err := strconv.Atoi(port); err != nil {
+		return "", fmt.Errorf("endpoint %q has a non-numeric port: %w", endpoint, err)
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
+// listenAddress turns the `--control-address` value into a net.Listen address.
+//
+// The real simulator hands that value straight to TcpListener::bind, so it accepts
+// a bare HOST:PORT socket address and nothing else: a ZMQ-style "tcp://host:port"
+// fails to resolve and the simulator exits. This double keeps the same rule
+// instead of normalizing the mismatch away, because the kind suite is the only
+// test that sees the generated command line end to end.
 func listenAddress(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
-	trimmed = strings.TrimPrefix(trimmed, "tcp://")
 	if trimmed == "" {
 		return "", fmt.Errorf("no address")
 	}
-	trimmed = strings.Replace(trimmed, "://", "", 1)
+	if strings.Contains(trimmed, "://") {
+		return "", fmt.Errorf("address %q carries a scheme: --control-address is a HOST:PORT socket address", raw)
+	}
 	idx := strings.LastIndex(trimmed, ":")
 	if idx < 0 {
 		return "", fmt.Errorf("address %q has no port", raw)
 	}
 	host, port := trimmed[:idx], trimmed[idx+1:]
-	if host == "*" || host == "" {
+	if host == "" {
 		host = "0.0.0.0"
 	}
 	if _, err := strconv.Atoi(port); err != nil {

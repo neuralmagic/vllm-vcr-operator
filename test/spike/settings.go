@@ -243,7 +243,9 @@ func (s Settings) BackendCommand() []string {
 		"--max-model-len", strconv.FormatInt(s.MaxModelLen, 10),
 		"--tokens-per-block", strconv.Itoa(int(s.TokensPerBlock)),
 		"--kv-cache-size", strconv.FormatInt(s.KVBlocks, 10),
-		"--control-address", "tcp://0.0.0.0:" + strconv.Itoa(s.ControlPort),
+		// HOST:PORT, not a ZMQ endpoint: the simulator binds this with
+		// TcpListener::bind (upstream docs/control-api.md:3).
+		"--control-address", "0.0.0.0:" + strconv.Itoa(s.ControlPort),
 		"--latency-trace", s.TracePath(),
 		"--shutdown-timeout", strconv.Itoa(int(s.ShutdownTimeout.Seconds())),
 		"--seed", strconv.Itoa(s.Seed),

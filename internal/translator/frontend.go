@@ -108,8 +108,12 @@ func backendInvocation(cfg *vllm.Config, eff effective, env Environment, metadat
 		"--shutdown-timeout", strconv.Itoa(eff.shutdownTimeout),
 		"--seed", strconv.Itoa(eff.seed),
 		// The control API is the only in-Pod witness for replay match rates and
-		// request statistics. It is JSON, not a metrics endpoint.
-		"--control-address", fmt.Sprintf("tcp://0.0.0.0:%d", names.ControlPort),
+		// request statistics. It is JSON, not a metrics endpoint, and its address
+		// is a plain HOST:PORT socket address, not a ZMQ endpoint: the simulator
+		// hands it straight to TcpListener::bind, which rejects a "tcp://" scheme
+		// ("vllm-vcr play --control-address HOST:PORT", upstream
+		// docs/control-api.md:3, entrypoint.sh:76, src/control.rs:319).
+		"--control-address", fmt.Sprintf("0.0.0.0:%d", names.ControlPort),
 	}
 	if eff.maxNumSeqs > 0 {
 		args = append(args, "--max-num-seqs", strconv.FormatInt(eff.maxNumSeqs, 10))
@@ -185,8 +189,8 @@ func traceArgs(metadata *profile.Metadata) []string {
 			"--replay-match", "prefix",
 		)
 	}
-	if metadata.VLLM.ConfigHash != "" {
-		args = append(args, "--expect-config-hash", metadata.VLLM.ConfigHash)
+	if hash := profile.ConfigHashValue(metadata.VLLM.ConfigHash); hash != "" {
+		args = append(args, "--expect-config-hash", hash)
 	}
 	return args
 }
