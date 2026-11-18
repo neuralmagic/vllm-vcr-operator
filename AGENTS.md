@@ -62,4 +62,5 @@ make manifests generate         # regenerate CRD/deepcopy after API edits
 | `cmd/*` | binaries (manager, deviceplugin, supervisor, profileexport) |
 | `config/` | kustomize manifests, CRD, RBAC, webhook config |
 | `test/e2e` | envtest acceptance tests |
+| `test/cluster` | kind-based cluster acceptance (scheduling, allocation, lifecycle) |
 | `test/spike` | runtime/serving spike harnesses (skipped without images) |
