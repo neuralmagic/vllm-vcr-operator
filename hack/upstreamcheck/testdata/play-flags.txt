@@ -1,0 +1,32 @@
+# `vllm-vcr play` flags the translator emits.
+#
+# One bare long-form flag per line, in the exact spelling the simulator binary
+# accepts. This is the operator's half of the upstream check: it is validated
+# against the code by TestPlayFlagSurfaceMatchesDeclaration
+# (internal/translator/playflags_test.go) and against the pinned simulator release
+# by hack/check-vllm-vcr-upstream.sh (docs/upstream-vllm-vcr.md).
+#
+# The injected Python frontend's `vllm serve` flags are not listed here.
+--control-address
+--enable-kv-cache-events
+--engine-id
+--expect-config-hash
+--handshake-address
+--kv-cache-size
+--kv-events-endpoint
+--kv-events-topic
+--latency-trace
+--log-requests
+--long-prefill-token-threshold
+--max-loras
+--max-model-len
+--max-num-batched-tokens
+--max-num-seqs
+--model-name
+--pd-role
+--replay-match
+--replay-tokens
+--scheduling-policy
+--seed
+--shutdown-timeout
+--tokens-per-block
