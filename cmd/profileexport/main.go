@@ -11,11 +11,13 @@
 // trace file the metadata declares is present and non-empty, then replaces the
 // target directory with a staged copy of both documents.
 //
-// The replacement is atomic at the directory level: content is written into a
-// staging directory next to the target and moved into place only after every
-// check has passed. A failed export therefore never leaves a partially
-// populated target directory that serving could mistake for a validated
-// profile. On success the command prints a single-line JSON summary on stdout.
+// The replacement is atomic at the file level: content is written into a staging
+// directory inside the target (the profile volume is the only writable path in the
+// provisioner container) and each document is moved into place only after every
+// check has passed, with metadata.json published last. A failed export therefore
+// never leaves a target directory that serving could mistake for a validated
+// profile, and every path removes the staging directory. On success the command
+// prints a single-line JSON summary on stdout.
 package main
 
 import (

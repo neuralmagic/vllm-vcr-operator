@@ -12,8 +12,11 @@ import (
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/profile"
 )
 
-// stagingPrefix names the temporary directory used to stage an export next to
-// the target directory, so the final move is a rename on the same filesystem.
+// stagingPrefix names the temporary directory used to stage an export inside the
+// target directory. Staging must live in the target because that is the only path
+// the provisioner can write to (the operator runs it with a read-only root
+// filesystem and only the profile volume writable), and because publishing is then
+// a rename inside one directory.
 const stagingPrefix = ".vcr-profile-export-"
 
 // summary is the single-line JSON document printed on success.
@@ -73,22 +76,31 @@ func export(ctx context.Context, source, target string) (summary, error) {
 		return summary{}, fmt.Errorf("source %q: trace file %q is empty: a profile without recorded data cannot be served", source, traceName)
 	}
 
-	targetParent := filepath.Dir(target)
-	if err := os.MkdirAll(targetParent, 0o755); err != nil {
-		return summary{}, fmt.Errorf("prepare target parent directory %q: %w", targetParent, err)
+	// The provisioner's root filesystem is read-only and the profile volume is
+	// mounted at target, so nothing may be written beside or above it.
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return summary{}, fmt.Errorf("prepare target directory %q: %w", target, err)
 	}
-	staging, err := os.MkdirTemp(targetParent, stagingPrefix)
+	staging, err := os.MkdirTemp(target, stagingPrefix)
 	if err != nil {
-		return summary{}, fmt.Errorf("create staging directory in %q: %w", targetParent, err)
+		return summary{}, fmt.Errorf("create staging directory in %q: %w", target, err)
 	}
-	defer func() { _ = os.RemoveAll(staging) }()
+	defer func() {
+		// Every path removes the staging directory, including the error paths: a
+		// leftover staging directory is debris that the next export has to clean up.
+		// A workspace that vanished mid-export is not an error worth reporting twice.
+		_ = removeAll(staging)
+	}()
 
-	if err := writeFile(filepath.Join(staging, names.ProfileMetadataFileName), raw); err != nil {
-		return summary{}, fmt.Errorf("stage profile metadata: %w", err)
-	}
+	// Stage the trace first and publish it first: metadata.json is the document
+	// that makes a profile volume complete, so it appears last and never before the
+	// trace it declares is in place.
 	traceBytes, err := copyFile(tracePath, filepath.Join(staging, traceName))
 	if err != nil {
 		return summary{}, fmt.Errorf("stage trace file %q: %w", traceName, err)
+	}
+	if err := writeFile(filepath.Join(staging, names.ProfileMetadataFileName), raw); err != nil {
+		return summary{}, fmt.Errorf("stage profile metadata: %w", err)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -96,11 +108,18 @@ func export(ctx context.Context, source, target string) (summary, error) {
 	}
 	// Replace, never merge: a stale profile must not survive next to the
 	// freshly exported documents.
-	if err := os.RemoveAll(target); err != nil {
-		return summary{}, fmt.Errorf("remove existing target %q: %w", target, err)
+	if err := clearTarget(target, staging); err != nil {
+		return summary{}, err
 	}
-	if err := os.Rename(staging, target); err != nil {
-		return summary{}, fmt.Errorf("move staged profile into %q: %w", target, err)
+	if err := os.Rename(filepath.Join(staging, traceName), filepath.Join(target, traceName)); err != nil {
+		return summary{}, fmt.Errorf("publish trace file %q into %q: %w", traceName, target, err)
+	}
+	if err := os.Rename(filepath.Join(staging, names.ProfileMetadataFileName),
+		filepath.Join(target, names.ProfileMetadataFileName)); err != nil {
+		return summary{}, fmt.Errorf("publish profile metadata into %q: %w", target, err)
+	}
+	if err := os.Remove(staging); err != nil {
+		return summary{}, fmt.Errorf("remove staging directory %q: %w", staging, err)
 	}
 
 	return summary{
@@ -112,6 +131,53 @@ func export(ctx context.Context, source, target string) (summary, error) {
 		Source:        source,
 		Target:        target,
 	}, nil
+}
+
+// clearTarget removes every entry of the target directory except the staging
+// directory, so a profile volume that already holds an export is replaced rather
+// than merged. Everything the export publishes is moved in afterwards.
+func clearTarget(target, staging string) error {
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		return fmt.Errorf("read target directory %q: %w", target, err)
+	}
+	for _, entry := range entries {
+		path := filepath.Join(target, entry.Name())
+		if path == staging {
+			continue
+		}
+		if err := removeAll(path); err != nil {
+			return fmt.Errorf("remove stale entry %q from the target directory: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// removeAll removes path, including content that lost write permission. An
+// interrupted export leaves a staging directory behind, and the provisioner runs
+// as an unprivileged user, so a plain RemoveAll can fail with "permission denied"
+// on a directory it still owns.
+func removeAll(path string) error {
+	err := os.RemoveAll(path)
+	if err == nil {
+		return nil
+	}
+	info, statErr := os.Lstat(path)
+	if statErr != nil || !info.IsDir() {
+		return err
+	}
+	// Best effort: make every directory traversable and writable, then retry. A
+	// path this fails on is reported by the retry below.
+	_ = filepath.WalkDir(path, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return os.Chmod(current, 0o700)
+		}
+		return os.Chmod(current, 0o600)
+	})
+	return os.RemoveAll(path)
 }
 
 // safeFileName rejects document names that could escape the profile directory.

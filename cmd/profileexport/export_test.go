@@ -275,12 +275,14 @@ func TestExportIsIdempotent(t *testing.T) {
 	if entries := targetEntries(t, target); len(entries) != 2 {
 		t.Errorf("target contains %v after two runs, want two files", entries)
 	}
-	leftovers, err := filepath.Glob(filepath.Join(parent, ".vcr-profile-export-*"))
-	if err != nil {
-		t.Fatalf("glob staging dirs: %v", err)
-	}
-	if len(leftovers) != 0 {
-		t.Errorf("staging directories left behind: %v", leftovers)
+	for _, dir := range []string{parent, target} {
+		leftovers, err := filepath.Glob(filepath.Join(dir, ".vcr-profile-export-*"))
+		if err != nil {
+			t.Fatalf("glob staging dirs in %q: %v", dir, err)
+		}
+		if len(leftovers) != 0 {
+			t.Errorf("staging directories left behind in %q: %v", dir, leftovers)
+		}
 	}
 }
 
@@ -351,5 +353,93 @@ func TestExportRejectsMetadataFileNameConflict(t *testing.T) {
 	}
 	if entries := targetEntries(t, target); len(entries) != 0 {
 		t.Errorf("failed export left target populated with %v", entries)
+	}
+}
+
+// TestExportStagesInsideTheTargetNotBesideIt covers the failure the cluster suite
+// found: the operator runs the provisioner with a read-only root filesystem and
+// only the profile volume writable, so the exporter may not create anything next
+// to (or above) the target directory.
+func TestExportStagesInsideTheTargetNotBesideIt(t *testing.T) {
+	source := writeProfileSource(t, validMetadata, []byte(validTrace))
+
+	parent := t.TempDir()
+	target := filepath.Join(parent, "profile")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	// The target's parent stands in for /var/run/vcr, which the provisioner
+	// mounts read-only: only the target itself is writable.
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatalf("make the target's parent read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+
+	code, stdout, stderr := runExport(t, "--source", source, target)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 with a read-only target parent (stderr: %s)", code, stderr)
+	}
+	decodeSummary(t, stdout)
+
+	if entries := targetEntries(t, target); len(entries) != 2 {
+		t.Errorf("target contains %v, want exactly metadata.json and trace.jsonl.gz", entries)
+	}
+	// Nothing may be staged beside the target: the parent is not writable in the
+	// provisioner and a leftover staging directory there would be debris.
+	if entries := targetEntries(t, parent); len(entries) != 1 || entries[0] != "profile" {
+		t.Errorf("the target's parent contains %v, want only the target directory", entries)
+	}
+}
+
+// TestExportRemovesAReadOnlyStagingLeftover covers an interrupted run: the
+// staging directory it left inside the target may have lost write permission, and
+// the next export must still clear it instead of failing or keeping it.
+func TestExportRemovesAReadOnlyStagingLeftover(t *testing.T) {
+	source := writeProfileSource(t, validMetadata, []byte(validTrace))
+	target := filepath.Join(t.TempDir(), "profile")
+
+	leftover := filepath.Join(target, stagingPrefix+"abandoned")
+	if err := os.MkdirAll(leftover, 0o755); err != nil {
+		t.Fatalf("create the leftover staging directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(leftover, "trace.jsonl.gz"), []byte("partial"), 0o644); err != nil {
+		t.Fatalf("write the leftover trace: %v", err)
+	}
+	if err := os.Chmod(leftover, 0o500); err != nil {
+		t.Fatalf("make the leftover staging directory read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(leftover, 0o755) })
+
+	code, _, stderr := runExport(t, "--source", source, target)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 with a read-only staging leftover (stderr: %s)", code, stderr)
+	}
+	if entries := targetEntries(t, target); len(entries) != 2 {
+		t.Errorf("target contains %v, want only the freshly exported files", entries)
+	}
+}
+
+// TestExportFailureLeavesTheTargetIncomplete asserts the ordering the contract
+// needs: a target directory that already exists (the provisioner's volume mount)
+// must not look like a validated profile after a failed export.
+func TestExportFailureLeavesTheTargetIncomplete(t *testing.T) {
+	source := writeProfileSource(t, validMetadata, nil) // no trace: validation fails
+	target := filepath.Join(t.TempDir(), "profile")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	code, _, stderr := runExport(t, "--source", source, target)
+	if code == 0 {
+		t.Fatal("exit code = 0, want non-zero when the trace is missing")
+	}
+	if !strings.Contains(stderr, "trace.jsonl.gz") {
+		t.Errorf("stderr = %q, want it to name the missing trace file", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(target, "metadata.json")); !os.IsNotExist(err) {
+		t.Errorf("a failed export published metadata.json (stat error: %v)", err)
+	}
+	if entries := targetEntries(t, target); len(entries) != 0 {
+		t.Errorf("failed export left the target populated with %v", entries)
 	}
 }
