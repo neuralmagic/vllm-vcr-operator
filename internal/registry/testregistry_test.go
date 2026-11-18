@@ -4,8 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -137,12 +135,6 @@ func tarBytes(t *testing.T, files map[string][]byte) []byte {
 		t.Fatalf("tar close: %v", err)
 	}
 	return buf.Bytes()
-}
-
-// digestOf returns the "sha256:..." digest of the supplied bytes.
-func digestOf(data []byte) string {
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // recordingCredentials returns an authn.Authenticator callback that records
