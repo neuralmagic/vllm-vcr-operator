@@ -497,11 +497,11 @@ func (s *Supervisor) setFrontendHealthy(healthy bool) {
 	s.mu.Lock()
 	changed := s.frontendHealth != healthy
 	s.frontendHealth = healthy
+	s.publishReadinessLocked()
 	s.mu.Unlock()
 	if changed {
 		s.logf("frontend health at %s: %s", s.frontendHealthURL, describeHealth(healthy))
 	}
-	s.publishReadiness()
 }
 
 func (s *Supervisor) setBackendHealthy(healthy bool) {
@@ -513,11 +513,11 @@ func (s *Supervisor) setBackendHealthy(healthy bool) {
 	} else if s.backendLostAt.IsZero() {
 		s.backendLostAt = time.Now()
 	}
+	s.publishReadinessLocked()
 	s.mu.Unlock()
 	if changed {
 		s.logf("simulator control API at %s: %s", s.backendHealthURL, describeHealth(healthy))
 	}
-	s.publishReadiness()
 }
 
 func describeHealth(healthy bool) string {
@@ -530,8 +530,8 @@ func describeHealth(healthy bool) string {
 func (s *Supervisor) setChildAlive(alive bool) {
 	s.mu.Lock()
 	s.childAlive = alive
+	s.publishReadinessLocked()
 	s.mu.Unlock()
-	s.publishReadiness()
 }
 
 // beginShutdown withdraws readiness before the frontend is signalled, so that
@@ -539,8 +539,8 @@ func (s *Supervisor) setChildAlive(alive bool) {
 func (s *Supervisor) beginShutdown() {
 	s.mu.Lock()
 	s.shuttingDown = true
+	s.publishReadinessLocked()
 	s.mu.Unlock()
-	s.publishReadiness()
 }
 
 func (s *Supervisor) isChildAlive() bool {
@@ -574,17 +574,22 @@ func (s *Supervisor) readinessLocked() (bool, string) {
 	}
 }
 
-// publishReadiness syncs the ready file with the current readiness state and
+// publishReadinessLocked syncs the ready file with the current readiness state and
 // logs transitions.
-func (s *Supervisor) publishReadiness() {
-	s.mu.Lock()
+//
+// It runs with s.mu held, in the same critical section that changed the state it
+// publishes. That ordering is the guarantee the ready file is useful for: a reader
+// of /readyz takes the same lock, so a "ready" answer can never be observed before
+// the marker exists, and a withdrawn readiness can never leave the marker behind.
+// (Publishing after releasing the lock made the marker lag readiness by one
+// scheduling decision, which is what an earlier intermittent test failure was
+// chasing.)
+func (s *Supervisor) publishReadinessLocked() {
 	ready, reason := s.readinessLocked()
-	changed := ready != s.publishedReady
-	s.publishedReady = ready
-	s.mu.Unlock()
-	if !changed {
+	if ready == s.publishedReady {
 		return
 	}
+	s.publishedReady = ready
 	if ready {
 		if err := writeReadyFile(s.cfg.ReadyFile); err != nil {
 			s.logf("cannot write ready file %q: %v", s.cfg.ReadyFile, err)
