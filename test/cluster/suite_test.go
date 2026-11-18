@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -482,6 +484,17 @@ func (s *suite) stepProvisioning(t *testing.T) {
 	}
 	s.execInPod(t, pod, names.FrontendContainerName,
 		"sh", "-c", "test -s "+names.ProfileMountPath+"/trace.jsonl.gz")
+
+	// The provisioner is the shipped exporter (no wrapper): it stages inside the
+	// profile volume and removes its staging directory, so the volume holds the two
+	// published documents and nothing else.
+	entries := strings.Fields(s.execInPod(t, pod, names.FrontendContainerName,
+		"sh", "-c", "ls -A "+names.ProfileMountPath))
+	sort.Strings(entries)
+	if want := []string{names.ProfileMetadataFileName, "trace.jsonl.gz"}; !slices.Equal(entries, want) {
+		t.Errorf("the profile volume holds %v, want exactly %v (leftover staging directories or a partial export)",
+			entries, want)
+	}
 
 	// The supervisor writes its ready file only while every readiness input holds.
 	s.execInPod(t, pod, names.FrontendContainerName, "sh", "-c", "test -f /tmp/vcr-runtime/ready")

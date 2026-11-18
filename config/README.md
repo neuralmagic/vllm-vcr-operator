@@ -46,6 +46,24 @@ kubectl label node <node> vcr.opendatahub-io/simulation=true
 The label must match `spec.simulationNodes.nodeSelector` in the environment; only
 matching nodes receive the synthetic GPU device plugin.
 
+## Pod Security
+
+The operator namespace (`config/default/namespace.yaml`) is labelled
+`pod-security.kubernetes.io/enforce: privileged`. Exactly one workload needs it: the
+operator-managed device-plugin DaemonSet `vllm-vcr-device-plugin` mounts the kubelet
+device-plugin directory `/var/lib/kubelet/device-plugins` as a `hostPath` in order to
+create its socket and register `nvidia.com/gpu` with kubelet. `hostPath` volumes are
+forbidden at the `baseline` and `restricted` levels, so `privileged` is the narrowest
+level that admits that mount. (The label used to say `baseline`; the API server then
+rejected the DaemonSet with `would violate PodSecurity "baseline:latest": hostPath
+volumes` and no synthetic capacity ever appeared.) Nothing else in the namespace relies
+on the level: the manager and the plugin both run non-privileged, without added
+capabilities, and with a read-only root filesystem.
+
+`hack/verify-manifests.sh` asserts the label, so a later change cannot silently break
+the DaemonSet. A `SimulationEnvironment` whose `DevicePluginReady` condition stays
+`False` with `would violate PodSecurity` in the namespace's events is this label.
+
 ## Required Secrets
 
 | Secret | Namespace | Required? | Purpose |

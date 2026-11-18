@@ -6,6 +6,12 @@ metadata:
   name: vllm-vcr-operator-system
   labels:
     app.kubernetes.io/name: vllm-vcr-operator
-    # baseline, not restricted: the operator-managed device-plugin DaemonSet runs
-    # with the access it needs to the kubelet plugin directory.
-    pod-security.kubernetes.io/enforce: baseline
+    # privileged, not baseline or restricted, for exactly one workload: the
+    # operator-managed device-plugin DaemonSet (vllm-vcr-device-plugin) mounts the
+    # kubelet device-plugin directory /var/lib/kubelet/device-plugins as a hostPath
+    # so it can create its socket and register its device plugin with kubelet.
+    # hostPath volumes are forbidden from the restricted and baseline levels, so
+    # privileged is the narrowest level that admits the plugin. Nothing else here
+    # relies on it: the manager and the plugin both run non-privileged, without
+    # added capabilities, and with a read-only root filesystem.
+    pod-security.kubernetes.io/enforce: privileged

@@ -124,6 +124,15 @@ else
   ok "no DaemonSet in config/default (operator-owned)"
 fi
 
+# Pod Security: the operator-owned device-plugin DaemonSet must mount
+# /var/lib/kubelet/device-plugins as a hostPath, which the restricted and baseline
+# levels forbid. A namespace labelled baseline (the previous value) makes the API
+# server reject that DaemonSet, so no synthetic capacity is ever advertised.
+build_has "operator namespace admits the device plugin's hostPath (Pod Security privileged)" \
+  'select(.kind == "Namespace" and .metadata.name == "'"$OPERATOR_NAMESPACE"'")
+   | .metadata.labels["pod-security.kubernetes.io/enforce"]
+   | select(. == "privileged")'
+
 build_has "SimulationEnvironment CRD is cluster scoped" \
   'select(.kind == "CustomResourceDefinition" and .spec.scope == "Cluster")'
 build_has "CRD keeps the singleton CEL rule" \

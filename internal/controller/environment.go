@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -221,6 +222,12 @@ func (r *SimulationEnvironmentReconciler) reconcileEnvironment(ctx context.Conte
 	}
 
 	if err := r.publishStatus(ctx, env, profiles, devicePlugin); err != nil {
+		if apierrors.IsConflict(err) {
+			// The retry budget was spent on a concurrent writer. That is not an
+			// actionable error: ask the work queue for another reconcile, which
+			// re-reads the object and publishes from the version it finds.
+			return ctrl.Result{RequeueAfter: r.RetryInterval}, nil
+		}
 		return ctrl.Result{}, err
 	}
 	if profiles.retry {
@@ -231,12 +238,58 @@ func (r *SimulationEnvironmentReconciler) reconcileEnvironment(ctx context.Conte
 
 // publishStatus writes the reconciled catalog and the three conditions, and only
 // touches the API when something actually changed.
+//
+// A status write can lose a race with another writer of the same object (a
+// finalizer, another manager, a user edit). That conflict is retried here with a
+// fresh read of the environment, because the desired status depends on the
+// version the API server holds: the conditions carry the transition times of
+// unchanged conditions and ObservedGeneration carries the current generation. Only
+// a spent retry budget is handed back to the caller to requeue.
 func (r *SimulationEnvironmentReconciler) publishStatus(
 	ctx context.Context,
 	env *vcrv1alpha1.SimulationEnvironment,
 	profiles profileReconciliation,
 	devicePlugin DevicePluginState,
 ) error {
+	key := client.ObjectKeyFromObject(env)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		current := &vcrv1alpha1.SimulationEnvironment{}
+		if err := r.Get(ctx, key, current); err != nil {
+			if apierrors.IsNotFound(err) {
+				// The environment was deleted while it was being published. There is
+				// nothing left to write, and its device plugin is garbage collected
+				// through the owner reference.
+				return nil
+			}
+			return fmt.Errorf("get SimulationEnvironment %s to publish its status: %w", env.Name, err)
+		}
+
+		desired := r.desiredStatus(current, profiles, devicePlugin)
+		if equality.Semantic.DeepEqual(current.Status, desired) {
+			return nil
+		}
+		previous := *current.Status.DeepCopy()
+		current.Status = desired
+		if err := r.Status().Update(ctx, current); err != nil {
+			// Retried only when this is a conflict; every other error is final.
+			return err
+		}
+		// Event once, after the write the API server accepted.
+		r.recordConditionChanges(current, previous)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("update SimulationEnvironment %s status: %w", env.Name, err)
+	}
+	return nil
+}
+
+// desiredStatus builds the status the reconciler publishes for env.
+func (r *SimulationEnvironmentReconciler) desiredStatus(
+	env *vcrv1alpha1.SimulationEnvironment,
+	profiles profileReconciliation,
+	devicePlugin DevicePluginState,
+) vcrv1alpha1.SimulationEnvironmentStatus {
 	status := vcrv1alpha1.SimulationEnvironmentStatus{
 		ObservedGeneration:   env.Generation,
 		SupportedVLLMVersion: names.SupportedVLLMVersion,
@@ -247,18 +300,7 @@ func (r *SimulationEnvironmentReconciler) publishStatus(
 	setCondition(&status, ConditionProfilesReconciled, profiles.condition())
 	setCondition(&status, ConditionDevicePluginReady, devicePluginCondition(devicePlugin, r.DevicePlugin))
 	setCondition(&status, ConditionReady, readyCondition(&status))
-
-	changed := !equality.Semantic.DeepEqual(env.Status, status)
-	original := env.Status
-	env.Status = status
-	if !changed {
-		return nil
-	}
-	r.recordConditionChanges(env, original)
-	if err := r.Status().Update(ctx, env); err != nil {
-		return fmt.Errorf("update SimulationEnvironment %s status: %w", env.Name, err)
-	}
-	return nil
+	return status
 }
 
 // recordConditionChanges emits one warning event when the reconciled profile
