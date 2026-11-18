@@ -1,6 +1,7 @@
 package runtime_test
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/runtime"
+	"github.com/opendatahub-io/vllm-vcr-operator/internal/supervisor"
 )
 
 const (
@@ -44,6 +46,8 @@ func testAdmission() *plan.Admission {
 			Args:    []string{"vllm", "serve", "Qwen/Qwen3-0.6B"},
 			Env: []corev1.EnvVar{
 				{Name: "VCR_HANDSHAKE_ADDRESS", Value: "tcp://127.0.0.1:29550"},
+				{Name: "VCR_FRONTEND_HEALTH_URL", Value: "http://127.0.0.1:8000/health"},
+				{Name: "VCR_BACKEND_HEALTH_URL", Value: "http://127.0.0.1:8001/stats"},
 				{Name: "VCR_SHUTDOWN_TIMEOUT", Value: "30"},
 			},
 			RemoveEnv: []string{"CUDA_VISIBLE_DEVICES", "VLLM_TARGET_DEVICE"},
@@ -260,16 +264,14 @@ func TestMutateAppliesTheRuntimeLayout(t *testing.T) {
 		t.Fatalf("init containers = %v, want %v", got, want)
 	}
 
-	// The workload's container identity, ports, probes, and labels survive.
+	// The workload's container identity, ports, and labels survive; its probes
+	// are replaced by the supervisor's readiness inputs.
 	frontend := containerByName(t, out.Spec.Containers, names.FrontendContainerName)
 	if got, want := frontend.Image, "quay.io/opendatahub/vllm-cpu:v0.33.0"; got != want {
 		t.Errorf("frontend image = %q, want %q", got, want)
 	}
-	if len(frontend.Ports) != 2 || frontend.Ports[0].Name != "modelserver" || frontend.Ports[1].Name != "engine-handshake" {
-		t.Errorf("frontend ports = %v, want the preserved inference port and the handshake port", frontend.Ports)
-	}
-	if frontend.ReadinessProbe == nil || frontend.ReadinessProbe.HTTPGet.Path != "/v1/models" {
-		t.Errorf("readiness probe = %v, want the preserved /v1/models probe", frontend.ReadinessProbe)
+	if len(frontend.Ports) != 3 || frontend.Ports[0].Name != "modelserver" || frontend.Ports[1].Name != "engine-handshake" {
+		t.Errorf("frontend ports = %v, want the preserved inference port, the handshake port, and the supervisor health port", frontend.Ports)
 	}
 	if out.Labels["llm-d.ai/inference-serving"] != "true" {
 		t.Errorf("labels = %v, want the llm-d discovery labels preserved", out.Labels)
@@ -672,5 +674,108 @@ func TestMutatePreservesRecognizedWeightDownloaderInitContainer(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("init containers = %v, want the weight downloader preserved", containerNames(out.Spec.InitContainers))
+	}
+}
+
+// probeTarget renders an HTTP probe's path and port for assertions.
+func probeTarget(t *testing.T, probe *corev1.Probe, probeName string) string {
+	t.Helper()
+	if probe == nil {
+		t.Fatalf("%s probe is missing", probeName)
+	}
+	if probe.HTTPGet == nil {
+		t.Fatalf("%s probe handler = %v, want an HTTP GET", probeName, probe.ProbeHandler)
+	}
+	return fmt.Sprintf("%s:%d", probe.HTTPGet.Path, probe.HTTPGet.Port.IntValue())
+}
+
+// TestMutateProbesTheSupervisorReadinessInputs asserts the frontend container is
+// probed through the supervisor rather than the inference port: the server's own
+// /health cannot see a lost simulator, so probing it would report Ready for an
+// engine-less or backend-less server.
+func TestMutateProbesTheSupervisorReadinessInputs(t *testing.T) {
+	out := mutate(t, workloadPod(), testAdmission())
+	frontend := containerByName(t, out.Spec.Containers, names.FrontendContainerName)
+
+	wantReady := fmt.Sprintf("%s:%d", supervisor.ReadyPath, supervisor.DefaultHealthPort)
+	if got := probeTarget(t, frontend.ReadinessProbe, "readiness"); got != wantReady {
+		t.Errorf("readiness probe = %s, want the supervisor's %s", got, wantReady)
+	}
+	wantLive := fmt.Sprintf("%s:%d", supervisor.HealthPath, supervisor.DefaultHealthPort)
+	if got := probeTarget(t, frontend.LivenessProbe, "liveness"); got != wantLive {
+		t.Errorf("liveness probe = %s, want the supervisor's %s", got, wantLive)
+	}
+	if got := frontend.ReadinessProbe.HTTPGet.Path; got == "/v1/models" {
+		t.Errorf("readiness probe path = %q, want the supervisor's readiness input, not the inference endpoint", got)
+	}
+
+	// Both readiness inputs reach the supervisor through the environment the
+	// translator derived from the workload's inference port and the control port.
+	for name, want := range map[string]string{
+		"VCR_FRONTEND_HEALTH_URL": "http://127.0.0.1:8000/health",
+		"VCR_BACKEND_HEALTH_URL":  "http://127.0.0.1:8001/stats",
+	} {
+		if got := mustEnv(t, frontend.Env, name); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+
+	// The supervisor health port is declared so the probes are visible in the
+	// container's port list.
+	found := false
+	for _, port := range frontend.Ports {
+		if port.ContainerPort == supervisor.DefaultHealthPort {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("frontend ports = %v, want a port for the supervisor health endpoint", frontend.Ports)
+	}
+}
+
+// TestMutateProbesTheSimulatorControlAPI asserts the simulator keeps its own
+// probes: readiness on the control API and liveness on the process.
+func TestMutateProbesTheSimulatorControlAPI(t *testing.T) {
+	out := mutate(t, workloadPod(), testAdmission())
+	backend := containerByName(t, out.Spec.Containers, names.BackendContainerName)
+
+	wantReady := fmt.Sprintf("/stats:%d", names.ControlPort)
+	if got := probeTarget(t, backend.ReadinessProbe, "backend readiness"); got != wantReady {
+		t.Errorf("backend readiness probe = %s, want %s", got, wantReady)
+	}
+	if backend.LivenessProbe == nil {
+		t.Fatal("backend liveness probe is missing: a wedged simulator would stay Ready")
+	}
+	if backend.LivenessProbe.TCPSocket == nil {
+		t.Fatalf("backend liveness probe handler = %v, want a control-API socket check", backend.LivenessProbe.ProbeHandler)
+	}
+	if got, want := backend.LivenessProbe.TCPSocket.Port.IntValue(), names.ControlPort; got != want {
+		t.Errorf("backend liveness probe port = %d, want %d", got, want)
+	}
+}
+
+// TestMutateRejectsAPlanWithoutReadinessInputs asserts a plan that would leave the
+// supervisor probing default URLs is rejected instead of silently reporting a
+// non-default inference port as unhealthy forever.
+func TestMutateRejectsAPlanWithoutReadinessInputs(t *testing.T) {
+	for _, missing := range []string{"VCR_FRONTEND_HEALTH_URL", "VCR_BACKEND_HEALTH_URL"} {
+		t.Run(missing, func(t *testing.T) {
+			admission := testAdmission()
+			kept := admission.Frontend.Env[:0]
+			for _, entry := range admission.Frontend.Env {
+				if entry.Name != missing {
+					kept = append(kept, entry)
+				}
+			}
+			admission.Frontend.Env = kept
+
+			_, err := runtime.Mutate(workloadPod(), admission)
+			if err == nil {
+				t.Fatalf("Mutate accepted a plan without %s", missing)
+			}
+			if !strings.Contains(err.Error(), missing) {
+				t.Fatalf("error %q does not name %s", err, missing)
+			}
+		})
 	}
 }
