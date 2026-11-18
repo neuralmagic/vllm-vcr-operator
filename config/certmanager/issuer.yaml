@@ -1,0 +1,12 @@
+# Self-signed issuer for the webhook serving certificate. Replace with a
+# CA-backed issuer (for example a cluster Issuer) if your policy requires it; the
+# Certificate below is the only consumer.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: vllm-vcr-operator-selfsigned-issuer
+  namespace: vllm-vcr-operator-system
+  labels:
+    app.kubernetes.io/name: vllm-vcr-operator
+spec:
+  selfSigned: {}

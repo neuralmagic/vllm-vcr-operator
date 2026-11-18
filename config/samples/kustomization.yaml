@@ -1,0 +1,16 @@
+# Sample: the singleton SimulationEnvironment and an unmodified, GPU-requesting
+# llm-d modelserver Deployment used to exercise admission.
+#
+# Not part of config/default: apply these deliberately (hack/install.sh --with-sample
+# or `kubectl apply -k config/samples`).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# No `namespace:` transformer here: the SimulationEnvironment is cluster scoped and
+# must not carry metadata.namespace, so each namespaced sample names its own
+# namespace explicitly.
+resources:
+  - vcr_v1alpha1_simulationenvironment.yaml
+  - llmd-modelserver-deployment.yaml
+  - llmd-modelserver-serviceaccount.yaml
+  - namespace.yaml

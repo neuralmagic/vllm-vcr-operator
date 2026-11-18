@@ -1,0 +1,12 @@
+# Optional certificate provisioning for the admission webhooks.
+#
+# cert-manager is one supported way to provide the webhook serving certificate;
+# config/README.md documents the pre-created-Secret alternative. Both paths must
+# produce a Secret named vllm-vcr-operator-webhook-server-cert with tls.crt,
+# tls.key, and ca.crt keys.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - issuer.yaml
+  - certificate.yaml

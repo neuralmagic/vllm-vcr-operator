@@ -1,0 +1,11 @@
+# The operator namespace. All operator-owned resources (Deployment, webhook
+# Service, certificates, Secrets) live here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vllm-vcr-operator-system
+  labels:
+    app.kubernetes.io/name: vllm-vcr-operator
+    # baseline, not restricted: the operator-managed device-plugin DaemonSet runs
+    # with the access it needs to the kubelet plugin directory.
+    pod-security.kubernetes.io/enforce: baseline

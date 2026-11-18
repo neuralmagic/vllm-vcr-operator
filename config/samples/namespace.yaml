@@ -1,0 +1,8 @@
+# Workload namespace for the sample modelserver. The operator never creates it; a
+# real E2E harness brings its own namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vllm-vcr-simulated
+  labels:
+    app.kubernetes.io/name: vllm-vcr-simulated

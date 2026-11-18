@@ -1,0 +1,126 @@
+# The operator manager: configuration/profile reconciliation, admission, and the
+# device-plugin DaemonSet reconciler.
+#
+# The image references are env-injected so one build serves every cluster:
+#   VCR_FRONTEND_IMAGE       Python vLLM frontend container (Dockerfile.supervisor --target frontend)
+#   VCR_BACKEND_IMAGE        vllm-vcr simulator container       (vllm-vcr Dockerfile)
+#   VCR_DEVICE_PLUGIN_IMAGE  synthetic GPU device plugin         (Dockerfile.device-plugin)
+#   VCR_SUPERVISOR_IMAGE     lifecycle supervisor                (Dockerfile.supervisor)
+# Defaults are documented placeholders; see config/README.md before installing.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-vcr-operator-controller-manager
+  namespace: vllm-vcr-operator-system
+  labels:
+    app.kubernetes.io/name: vllm-vcr-operator
+    app.kubernetes.io/component: manager
+    control-plane: controller-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm-vcr-operator
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vllm-vcr-operator
+        app.kubernetes.io/component: manager
+        control-plane: controller-manager
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+    spec:
+      serviceAccountName: vllm-vcr-operator-controller-manager
+      # Admission must keep answering while the leader drains, so the grace period
+      # covers webhook shutdown rather than only the reconcile loop.
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: quay.io/opendatahub/vllm-vcr-operator:v0.1.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /manager
+          args:
+            - --leader-elect
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            - --webhook-port=9443
+            - --webhook-cert-dir=/tmp/k8s-webhook-server/serving-certs
+            # $(OPERATOR_NAMESPACE) is expanded by the kubelet from the env var
+            # below, so the manager always reads Secrets in its own namespace.
+            - --operator-namespace=$(OPERATOR_NAMESPACE)
+          env:
+            - name: OPERATOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # Placeholder-but-valid defaults: no image is published yet, and no
+            # default points at a private registry. Override in your overlay.
+            - name: VCR_FRONTEND_IMAGE
+              value: quay.io/opendatahub/vllm-vcr-frontend:v0.33.0-cpu
+            - name: VCR_BACKEND_IMAGE
+              value: quay.io/opendatahub/vllm-vcr-backend:v0.33.0
+            - name: VCR_DEVICE_PLUGIN_IMAGE
+              value: quay.io/opendatahub/vllm-vcr-device-plugin:v0.33.0
+            - name: VCR_SUPERVISOR_IMAGE
+              value: quay.io/opendatahub/vllm-vcr-supervisor:v0.33.0
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+            - name: webhook
+              containerPort: 9443
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: webhook-certs
+          # Issued by config/certmanager (cert-manager) or pre-created by hand;
+          # see config/README.md. The Pod does not start without it.
+          secret:
+            secretName: vllm-vcr-operator-webhook-server-cert
+            defaultMode: 0444
+            optional: false
+        - name: tmp
+          emptyDir: {}

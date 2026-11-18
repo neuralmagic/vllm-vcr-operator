@@ -1,0 +1,57 @@
+# The singleton simulation configuration.
+#
+# Rules enforced by the CRD, mirrored here:
+#   - the name must be "default" (CEL rule on the CRD)
+#   - spec.simulationNodes.nodeSelector must select at least one label; only nodes
+#     matching it receive the synthetic GPU device plugin
+#   - spec.runtime sizes the *real* CPU/memory of the injected containers; it
+#     replaces the original GPU-server sizing
+#
+# Profile images are recorded artifacts published by a separate repository (see
+# docs/contracts/profile-image.md). The reference below is a documented
+# placeholder: replace it with a digest-pinned profile image before use.
+apiVersion: vcr.opendatahub-io/v1alpha1
+kind: SimulationEnvironment
+metadata:
+  name: default
+spec:
+  simulationNodes:
+    nodeSelector:
+      vcr.opendatahub-io/simulation: "true"
+    tolerations:
+      - key: vcr.opendatahub-io/simulation
+        operator: Exists
+        effect: NoSchedule
+  # Scheduling quantity, not a performance multiplier: 8 synthetic H200s per
+  # selected node.
+  devicesPerNode: 8
+  gpuType: H200
+  profiles:
+    - image: quay.io/opendatahub/vllm-vcr-profiles:qwen3-0.6b-h200-tp1-bf16
+  # Optional: Secrets in the operator namespace used to pull private profile
+  # images. Only the credentials needed by the selected profile are projected
+  # into the workload namespace.
+  imagePullSecrets: []
+  runtime:
+    frontend:
+      requests:
+        cpu: "1"
+        memory: 2Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    backend:
+      requests:
+        cpu: "2"
+        memory: 2Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+    provisioner:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  logLevel: info
