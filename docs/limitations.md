@@ -60,9 +60,10 @@ readiness itself is unaffected — the workload's own `/v1/models` probe is
 preserved and does not pass before engine registration — but the diagnostic signal
 is weaker than documented.
 
-The runtime-layout spike asserts the contract, so
-`make test-spike` reports this as a failing step until the supervisor reads
-`VCR_FRONTEND_HEALTH_URL` and `VCR_BACKEND_HEALTH_URL`.
+The runtime-layout spike asserts the contract, so a `make test-spike` run with
+images reports this as a failing step (`readiness stays withdrawn while the
+simulator is absent`) until the supervisor reads `VCR_FRONTEND_HEALTH_URL` and
+`VCR_BACKEND_HEALTH_URL`.
 
 ### Per-token logprobs are empty
 
