@@ -507,7 +507,10 @@ available flag, is the authority.
   and host volumes for real devices or driver userspace (the device-plugin directory,
   `/usr/local/nvidia`, `/var/lib/nvidia`, `/run/nvidia`, `/dev/nvidia*`, and the
   driver libraries).
-- Applied from the environment: the simulation node selector and tolerations.
+- Applied from the environment: the simulation node selector and tolerations, and
+  the CPU/memory sizing of the injected containers. Environment sizing that asks for
+  `nvidia.com/gpu` is rejected: only the workload's own container holds the synthetic
+  allocation, so the count stays exactly one.
 - Preserved: every other constraint — storage, operating system, zone, sidecar-driven
   affinity. A preserved workload constraint that contradicts the environment's node
   selection cannot be satisfied on a simulation node and is reported instead of being

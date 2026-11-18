@@ -302,6 +302,28 @@ func (e Environment) resolve() (Environment, error) {
 	if strings.TrimSpace(e.LogLevel) == "" {
 		e.LogLevel = "info"
 	}
+	// Injected containers never request the synthetic device: the workload's own
+	// container keeps the allocation (docs/contracts/admission.md).
+	gpu := corev1.ResourceName(names.SyntheticResourceName)
+	for _, sizing := range []struct {
+		name        string
+		requirement corev1.ResourceRequirements
+	}{
+		{"runtime.frontend", e.Sizing.Frontend},
+		{"runtime.backend", e.Sizing.Backend},
+		{"runtime.provisioner", e.Sizing.Provisioner},
+	} {
+		if _, ok := sizing.requirement.Requests[gpu]; ok {
+			failures = append(failures, fmt.Errorf(
+				"translator: environment %s must not request %s: injected containers never request the synthetic device",
+				sizing.name, names.SyntheticResourceName))
+		}
+		if _, ok := sizing.requirement.Limits[gpu]; ok {
+			failures = append(failures, fmt.Errorf(
+				"translator: environment %s must not limit %s: injected containers never request the synthetic device",
+				sizing.name, names.SyntheticResourceName))
+		}
+	}
 	if len(e.RuntimeClasses) == 0 {
 		e.RuntimeClasses = append([]string(nil), defaultAcceleratorRuntimeClasses...)
 	}

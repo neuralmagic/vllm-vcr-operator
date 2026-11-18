@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
@@ -484,6 +485,9 @@ func TestEnvironmentCapabilitiesAreValidated(t *testing.T) {
 		{name: "missing frontend image", env: func(e *translator.Environment) { e.Images.Frontend = "" }, want: "frontend image"},
 		{name: "missing backend image", env: func(e *translator.Environment) { e.Images.Backend = "" }, want: "backend image"},
 		{name: "unsupported release", env: func(e *translator.Environment) { e.SupportedVLLMVersion = "0.32.0" }, want: "supportedVLLMVersion"},
+		{name: "sizing requests the synthetic device", env: func(e *translator.Environment) {
+			e.Sizing.Backend.Requests = corev1.ResourceList{names.SyntheticResourceName: resource.MustParse("1")}
+		}, want: "synthetic device"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
