@@ -690,3 +690,97 @@ func TestImmediateShutdownPolicyExitsCleanly(t *testing.T) {
 		t.Fatalf("ready file %s still exists after shutdown", cfg.ReadyFile)
 	}
 }
+
+// TestColdStartDoesNotTerminateFrontend is the regression test for a real failure:
+// with a Python frontend that takes ~40s to import torch, resolve the model
+// config and fetch tokenizer files, the simulator has not reached its control API
+// yet. Treating that as a lost backend killed the frontend five seconds in and
+// put the Pod in CrashLoopBackOff. Both containers cold-start together, so an
+// unhealthy simulator that has never been healthy must not terminate anything
+// before the startup budget is spent.
+func TestColdStartDoesNotTerminateFrontend(t *testing.T) {
+	cfg, _, backend := testConfig(t)
+	backend.setStatus(http.StatusServiceUnavailable) // simulator still starting
+	cfg.BackendLossGrace = 100 * time.Millisecond    // would have killed it instantly before
+	cfg.BackendStartupTimeout = 30 * time.Second
+	s, err := supervisor.New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	codes := startSupervisor(t, s, ctx)
+
+	waitStatus(t, healthzURL(t, s), http.StatusOK, 5*time.Second)
+	// Readiness stays withdrawn while the simulator is absent...
+	time.Sleep(500 * time.Millisecond)
+	waitStatus(t, readyzURL(t, s), http.StatusServiceUnavailable, time.Second)
+	select {
+	case code := <-codes:
+		t.Fatalf("supervisor exited (code %d) during a cold start; the frontend must survive until the startup budget", code)
+	default:
+	}
+
+	// ...and the cold start completes normally once the simulator arrives.
+	backend.setStatus(http.StatusOK)
+	waitStatus(t, readyzURL(t, s), http.StatusOK, 5*time.Second)
+	select {
+	case code := <-codes:
+		t.Fatalf("supervisor exited (code %d) after the cold start", code)
+	default:
+	}
+}
+
+// TestStartupBudgetExhaustedFailsTheContainer covers the other side: a simulator
+// that never arrives is not tolerated forever, because that would leave a Pod
+// that never becomes ready with no signal.
+func TestStartupBudgetExhaustedFailsTheContainer(t *testing.T) {
+	cfg, _, backend := testConfig(t)
+	backend.setStatus(http.StatusServiceUnavailable)
+	cfg.BackendStartupTimeout = 300 * time.Millisecond
+	cfg.BackendLossGrace = time.Hour // proves the startup budget is what fired
+	s, err := supervisor.New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	codes := startSupervisor(t, s, ctx)
+
+	select {
+	case code := <-codes:
+		if code == 0 {
+			t.Fatal("supervisor exited 0 although the simulator never became healthy")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("supervisor did not fail after the startup budget was exhausted")
+	}
+}
+
+// TestBackendLossAfterHealthyStillTerminates proves the shutdown-on-loss behavior
+// is unchanged for a simulator that was serving and then disappeared.
+func TestBackendLossAfterHealthyStillTerminates(t *testing.T) {
+	cfg, _, backend := testConfig(t)
+	cfg.BackendStartupTimeout = time.Hour // only the loss grace can fire
+	s, err := supervisor.New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	codes := startSupervisor(t, s, ctx)
+	waitStatus(t, readyzURL(t, s), http.StatusOK, 5*time.Second)
+
+	backend.setStatus(http.StatusServiceUnavailable)
+	select {
+	case code := <-codes:
+		if code == 0 {
+			t.Fatal("supervisor exited 0 after losing a healthy simulator")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("supervisor did not terminate after the backend loss grace")
+	}
+}

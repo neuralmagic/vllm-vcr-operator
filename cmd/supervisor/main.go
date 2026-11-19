@@ -21,6 +21,7 @@
 //	VCR_BACKEND_HEALTH_URL    simulator control URL (default http://127.0.0.1:8001/stats)
 //	VCR_READY_FILE            readiness marker file (default /tmp/vcr-runtime/ready)
 //	VCR_SHUTDOWN_TIMEOUT      graceful shutdown budget in seconds (default 0, immediate)
+//	VCR_BACKEND_STARTUP_TIMEOUT  cold-start budget for the simulator (default 5m)
 package main
 
 import (
@@ -103,6 +104,14 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (s
 		}
 		shutdownDefault = d
 	}
+	backendStartupDefault := supervisor.DefaultBackendStartupTimeout
+	if v := getenv("VCR_BACKEND_STARTUP_TIMEOUT"); v != "" {
+		d, err := parseSeconds(v)
+		if err != nil {
+			return supervisor.Config{}, fmt.Errorf("VCR_BACKEND_STARTUP_TIMEOUT=%q is not a duration in seconds: %w", v, err)
+		}
+		backendStartupDefault = d
+	}
 
 	fs := flag.NewFlagSet("vcr-supervisor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -117,7 +126,9 @@ func parseConfig(args []string, getenv func(string) string, stderr io.Writer) (s
 	healthAddress := fs.String("health-address", supervisor.DefaultHealthAddress,
 		"listen address of the local /healthz and /readyz endpoint")
 	backendLossGrace := fs.Duration("backend-loss-grace", supervisor.DefaultBackendLossGrace,
-		"how long the engine may stay unreachable before the frontend is terminated")
+		"how long the engine may stay unreachable, after having been healthy, before the frontend is terminated")
+	backendStartupTimeout := fs.Duration("backend-startup-timeout", backendStartupDefault,
+		"how long the engine may stay unhealthy during startup before the frontend is terminated; a cold frontend needs minutes")
 	shutdownTimeout := fs.Duration("shutdown-timeout", shutdownDefault,
 		"graceful shutdown budget for the frontend; 0 terminates immediately")
 	healthPollInterval := fs.Duration("health-poll-interval", supervisor.DefaultHealthPollInterval,
@@ -130,8 +141,13 @@ health URL answers 2xx, and the simulator control API answers 2xx. The engine-co
 handshake address is passed to the frontend and is not a readiness signal.
 Without --, the first non-flag argument starts the frontend command.
 
+Readiness is not a liveness signal: a simulator that has never been healthy is a
+cold-start race, so the frontend is kept alive for the startup budget
+(--backend-startup-timeout, default 5m) before the container gives up.
+
 Environment fallbacks: VCR_HANDSHAKE_ADDRESS, VCR_FRONTEND_HEALTH_URL,
-VCR_BACKEND_HEALTH_URL, VCR_READY_FILE, VCR_SHUTDOWN_TIMEOUT (seconds).
+VCR_BACKEND_HEALTH_URL, VCR_READY_FILE, VCR_SHUTDOWN_TIMEOUT (seconds),
+VCR_BACKEND_STARTUP_TIMEOUT (seconds).
 Flags take precedence.
 
 Flags:
@@ -149,16 +165,17 @@ Flags:
 	}
 
 	return supervisor.Config{
-		Command:            command,
-		Env:                os.Environ(),
-		HandshakeAddress:   *handshake,
-		FrontendHealthURL:  *frontendHealth,
-		BackendHealthURL:   *backendHealth,
-		ReadyFile:          *readyFile,
-		HealthAddress:      *healthAddress,
-		BackendLossGrace:   *backendLossGrace,
-		ShutdownTimeout:    *shutdownTimeout,
-		HealthPollInterval: *healthPollInterval,
+		Command:               command,
+		Env:                   os.Environ(),
+		HandshakeAddress:      *handshake,
+		FrontendHealthURL:     *frontendHealth,
+		BackendHealthURL:      *backendHealth,
+		ReadyFile:             *readyFile,
+		HealthAddress:         *healthAddress,
+		BackendLossGrace:      *backendLossGrace,
+		BackendStartupTimeout: *backendStartupTimeout,
+		ShutdownTimeout:       *shutdownTimeout,
+		HealthPollInterval:    *healthPollInterval,
 	}, nil
 }
 

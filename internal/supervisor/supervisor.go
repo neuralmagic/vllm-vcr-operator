@@ -88,6 +88,10 @@ const (
 	// unhealthy before the frontend is terminated.
 	DefaultBackendLossGrace = 5 * time.Second
 
+	// DefaultBackendStartupTimeout covers a cold start of the Python frontend:
+	// importing torch, resolving the model config and fetching tokenizer files.
+	DefaultBackendStartupTimeout = 5 * time.Minute
+
 	// DefaultHealthPollInterval is how often each readiness input is probed.
 	DefaultHealthPollInterval = 100 * time.Millisecond
 
@@ -145,8 +149,17 @@ type Config struct {
 	HealthAddress string
 
 	// BackendLossGrace is how long the simulator control API may stay unhealthy
-	// before the frontend is terminated and the container exits non-zero.
+	// after it has been healthy at least once, before the frontend is terminated
+	// and the container exits non-zero.
 	BackendLossGrace time.Duration
+
+	// BackendStartupTimeout is how long the simulator may stay unhealthy at
+	// startup before the frontend is terminated. Both containers cold-start
+	// together, and the frontend binds the engine-core handshake only after it has
+	// loaded its tokenizer, so a simulator that has never been healthy is a
+	// startup race, not a lost backend. Nothing is terminated before this budget
+	// is spent.
+	BackendStartupTimeout time.Duration
 
 	// ShutdownTimeout is the graceful shutdown budget for the frontend. Zero
 	// means immediate: SIGTERM is forwarded and SIGKILL follows without
@@ -175,6 +188,11 @@ type Supervisor struct {
 	frontendHealth bool
 	backendHealth  bool
 	backendLostAt  time.Time
+	// backendEverHealthy distinguishes "both containers cold-starting" from "a
+	// simulator that was serving and then disappeared".
+	backendEverHealthy bool
+	// startedAt is when the frontend was started; the startup budget runs from it.
+	startedAt      time.Time
 	shuttingDown   bool
 	publishedReady bool
 	healthAddr     string
@@ -211,6 +229,10 @@ func New(cfg Config) (*Supervisor, error) {
 		return nil, fmt.Errorf("supervisor: backend loss grace %s must not be negative", cfg.BackendLossGrace)
 	case cfg.BackendLossGrace == 0:
 		cfg.BackendLossGrace = DefaultBackendLossGrace
+	case cfg.BackendStartupTimeout < 0:
+		return nil, fmt.Errorf("supervisor: backend startup timeout %s must not be negative", cfg.BackendStartupTimeout)
+	case cfg.BackendStartupTimeout == 0:
+		cfg.BackendStartupTimeout = DefaultBackendStartupTimeout
 	}
 	if cfg.ShutdownTimeout < 0 {
 		return nil, fmt.Errorf("supervisor: shutdown timeout %s must not be negative", cfg.ShutdownTimeout)
@@ -300,6 +322,9 @@ func (s *Supervisor) Run(ctx context.Context) (int, error) {
 		return exitCodeFailure, fmt.Errorf("supervisor: start frontend %q: %w", strings.Join(s.cfg.Command, " "), err)
 	}
 	s.logf("started frontend pid %d", cmd.Process.Pid)
+	s.mu.Lock()
+	s.startedAt = time.Now()
+	s.mu.Unlock()
 	s.setChildAlive(true)
 
 	exitCh := make(chan error, 1)
@@ -343,11 +368,21 @@ func (s *Supervisor) Run(ctx context.Context) (int, error) {
 				s.setChildAlive(false)
 				return code, nil
 			}
-			s.logf("simulator control API at %s unhealthy for longer than %s; terminating frontend", s.backendHealthURL, s.cfg.BackendLossGrace)
+			s.mu.Lock()
+			everHealthy := s.backendEverHealthy
+			s.mu.Unlock()
+			if everHealthy {
+				s.logf("simulator control API at %s unhealthy for longer than %s; terminating frontend", s.backendHealthURL, s.cfg.BackendLossGrace)
+			} else {
+				s.logf("simulator control API at %s never became healthy within the %s startup budget; terminating frontend", s.backendHealthURL, s.cfg.BackendStartupTimeout)
+			}
 			s.beginShutdown()
 			s.stopChild(cmd, exitCh)
 			s.setChildAlive(false)
-			return exitCodeFailure, fmt.Errorf("supervisor: simulator control API at %s was unhealthy for longer than %s", s.backendHealthURL, s.cfg.BackendLossGrace)
+			if everHealthy {
+				return exitCodeFailure, fmt.Errorf("supervisor: simulator control API at %s was unhealthy for longer than %s", s.backendHealthURL, s.cfg.BackendLossGrace)
+			}
+			return exitCodeFailure, fmt.Errorf("supervisor: simulator control API at %s never became healthy within the %s startup budget", s.backendHealthURL, s.cfg.BackendStartupTimeout)
 		}
 	}
 }
@@ -444,8 +479,12 @@ func (s *Supervisor) watchHealth(ctx context.Context, setting, healthURL string,
 	}
 }
 
-// watchBackendLoss probes the simulator control API and reports eventBackendLost
-// once it has been unhealthy for longer than the configured grace period.
+// watchBackendLoss probes the simulator control API and reports a backend event
+// once the state warrants terminating the frontend:
+//
+//   - a backend that has never been healthy is a startup race; it only fails once
+//     the startup budget is spent;
+//   - a backend that was healthy and then disappears fails after the loss grace.
 func (s *Supervisor) watchBackendLoss(ctx context.Context, events chan<- watchEvent) {
 	ticker := time.NewTicker(s.healthPollInterval)
 	defer ticker.Stop()
@@ -455,9 +494,17 @@ func (s *Supervisor) watchBackendLoss(ctx context.Context, events chan<- watchEv
 
 		s.mu.Lock()
 		lostAt, wasLost := s.backendLostAt, !s.backendLostAt.IsZero()
+		everHealthy, startedAt := s.backendEverHealthy, s.startedAt
 		s.mu.Unlock()
-		if wasLost && time.Since(lostAt) > s.cfg.BackendLossGrace {
-			// Deliver the loss without leaking when Run has already stopped.
+
+		failed := false
+		if !everHealthy {
+			failed = !startedAt.IsZero() && time.Since(startedAt) > s.cfg.BackendStartupTimeout
+		} else if wasLost {
+			failed = time.Since(lostAt) > s.cfg.BackendLossGrace
+		}
+		if failed {
+			// Deliver the event without leaking when Run has already stopped.
 			select {
 			case events <- eventBackendLost:
 			case <-ctx.Done():
@@ -510,6 +557,7 @@ func (s *Supervisor) setBackendHealthy(healthy bool) {
 	s.backendHealth = healthy
 	if healthy {
 		s.backendLostAt = time.Time{}
+		s.backendEverHealthy = true
 	} else if s.backendLostAt.IsZero() {
 		s.backendLostAt = time.Now()
 	}

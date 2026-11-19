@@ -317,7 +317,9 @@ func TestMutatedPodPreservesModelArguments(t *testing.T) {
 	if argv := strings.Join(append(frontend.Command, frontend.Args...), " "); !strings.Contains(argv, "--served-model-name qwen-alias") {
 		t.Errorf("frontend argv %q does not preserve the workload's served-model alias", argv)
 	}
-	if argv := strings.Join(backend.Command, " "); !strings.Contains(argv, "--max-model-len 4096") {
+	// The simulator runs under a cold-start wait wrapper, so its argv is the
+	// wrapper script: the planned flags appear quoted inside it.
+	if argv := strings.Join(backend.Command, " ") + " " + strings.Join(backend.Args, " "); !strings.Contains(argv, "--max-model-len") || !strings.Contains(argv, "4096") {
 		t.Errorf("backend argv %q does not carry the workload's --max-model-len", argv)
 	}
 }

@@ -444,18 +444,75 @@ func mergeResources(sizing, original corev1.ResourceRequirements) corev1.Resourc
 	return out
 }
 
+// backendStartupWaitSeconds bounds how long the simulator waits for the frontend's
+// engine-core handshake to exist before it starts anyway. A real Python frontend
+// needs tens of seconds to import torch, resolve the model config and fetch
+// tokenizer files; vllm-vcr gives up after 30s of dialing and exits, which would
+// cost a container restart on every cold start. Waiting here is a cold-start
+// ordering fix only: it does not assume a live session can be re-established,
+// and the supervisor still treats a lost simulator as a container restart.
+const backendStartupWaitSeconds = 300
+
+// backendCommand returns the simulator's command and arguments, prefixed with a
+// bounded wait for the handshake socket. The wait uses bash's /dev/tcp, which the
+// pinned vllm-vcr image provides (it ships bash; it has no nc).
+func backendCommand(admission *plan.Admission) ([]string, []string) {
+	backend := admission.Backend
+	argv := append(append([]string(nil), backend.Command...), backend.Args...)
+	address := handshakeAddress(backend.Args)
+	script := fmt.Sprintf(
+		"for i in $(seq 1 %d); do (exec 3<>/dev/tcp/%s) 2>/dev/null && break; sleep 1; done; exec %s",
+		backendStartupWaitSeconds, address, shellQuoteAll(argv))
+	return []string{"/bin/bash", "-c"}, []string{script}
+}
+
+// handshakeAddress extracts host:port from the plan's --handshake-address value,
+// defaulting to loopback on the contract port.
+func handshakeAddress(args []string) string {
+	for i, arg := range args {
+		value := ""
+		switch {
+		case arg == "--handshake-address" && i+1 < len(args):
+			value = args[i+1]
+		case strings.HasPrefix(arg, "--handshake-address="):
+			value = strings.TrimPrefix(arg, "--handshake-address=")
+		}
+		if value == "" {
+			continue
+		}
+		if _, rest, ok := strings.Cut(value, "://"); ok {
+			value = rest
+		}
+		if host, port, ok := strings.Cut(value, ":"); ok && host != "" && port != "" {
+			return host + ":" + port
+		}
+	}
+	return fmt.Sprintf("127.0.0.1:%d", names.HandshakePort)
+}
+
+// shellQuoteAll renders argv for a bash -c script, quoting every word so that
+// flags carrying spaces or quotes survive.
+func shellQuoteAll(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, word := range argv {
+		quoted[i] = "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
+	}
+	return strings.Join(quoted, " ")
+}
+
 // backendContainer builds the simulator container.
 func backendContainer(admission *plan.Admission) (corev1.Container, error) {
 	backend := admission.Backend
 	if len(backend.Command) == 0 {
 		return corev1.Container{}, fmt.Errorf("runtime: the admission plan carries no simulator command")
 	}
+	command, args := backendCommand(admission)
 	return corev1.Container{
 		Name:            names.BackendContainerName,
 		Image:           backend.Image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         append([]string(nil), backend.Command...),
-		Args:            append([]string(nil), backend.Args...),
+		Command:         command,
+		Args:            args,
 		Env:             append([]corev1.EnvVar(nil), backend.Env...),
 		Ports:           append([]corev1.ContainerPort(nil), backend.Ports...),
 		Resources:       *admission.Resources.Backend.DeepCopy(),

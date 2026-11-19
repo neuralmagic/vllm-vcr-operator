@@ -34,6 +34,24 @@ but the Pod's own readiness probe is the supervisor's `/readyz` (see below): the
 inference endpoint alone cannot observe a lost simulator, so probing it would keep an
 engine-less server Ready.
 
+## Cold start
+
+Both containers start at once, but the frontend binds the engine-core handshake
+only after importing torch, resolving the model config and fetching tokenizer
+files — tens of seconds on a real image. Two consequences are part of the
+contract:
+
+- The simulator must not exit while the handshake is absent. `vllm-vcr` gives up
+  after 30s of dialing, so the runtime prefixes its command with a bounded wait
+  for the handshake socket and then `exec`s the planned argv.
+- The supervisor must not treat an unhealthy simulator that has never been healthy
+  as a lost backend. It keeps the frontend alive for `--backend-startup-timeout`
+  (default 5m) and only reports readiness when both inputs answer. A simulator
+  that was healthy and then disappears still fails after `--backend-loss-grace`.
+
+A cold start therefore costs no container restarts, and a simulator that never
+arrives still fails the container instead of hanging forever.
+
 ## Supervision and failure propagation
 
 `vcr-supervisor` runs the frontend as its only long-lived child because the
