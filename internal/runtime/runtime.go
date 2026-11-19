@@ -444,50 +444,27 @@ func mergeResources(sizing, original corev1.ResourceRequirements) corev1.Resourc
 	return out
 }
 
-// backendStartupWaitSeconds bounds how long the simulator waits for the frontend's
-// engine-core handshake to exist before it starts anyway. A real Python frontend
-// needs tens of seconds to import torch, resolve the model config and fetch
-// tokenizer files; vllm-vcr gives up after 30s of dialing and exits, which would
-// cost a container restart on every cold start. Waiting here is a cold-start
-// ordering fix only: it does not assume a live session can be re-established,
-// and the supervisor still treats a lost simulator as a container restart.
-const backendStartupWaitSeconds = 300
+// backendRestartLoop keeps the simulator process supervised inside its container.
+//
+// vllm-vcr gives up after 30s when the frontend's engine-core handshake is not
+// there yet, and a real Python frontend needs tens of seconds to import torch,
+// resolve the model config and fetch tokenizer files. The frontend container's
+// supervisor already keeps that cold start alive for minutes, so the simulator
+// only has to retry instead of exiting: kubelet restart backoff would otherwise
+// stretch the retry interval to minutes, and probing the handshake socket itself
+// is not an option - a dial would occupy the accept queue the simulator's real
+// connection needs, and a successful dial never proved an engine was registered.
+const backendRestartDelaySeconds = 2
 
-// backendCommand returns the simulator's command and arguments, prefixed with a
-// bounded wait for the handshake socket. The wait uses bash's /dev/tcp, which the
-// pinned vllm-vcr image provides (it ships bash; it has no nc).
+// backendCommand returns the simulator's command and arguments, wrapped in a
+// restart loop so a cold frontend does not cost a container restart.
 func backendCommand(admission *plan.Admission) ([]string, []string) {
 	backend := admission.Backend
 	argv := append(append([]string(nil), backend.Command...), backend.Args...)
-	address := handshakeAddress(backend.Args)
 	script := fmt.Sprintf(
-		"for i in $(seq 1 %d); do (exec 3<>/dev/tcp/%s) 2>/dev/null && break; sleep 1; done; exec %s",
-		backendStartupWaitSeconds, address, shellQuoteAll(argv))
+		"while true; do %s; echo 'vcr-backend: simulator exited, restarting in %ds'; sleep %d; done",
+		shellQuoteAll(argv), backendRestartDelaySeconds, backendRestartDelaySeconds)
 	return []string{"/bin/bash", "-c"}, []string{script}
-}
-
-// handshakeAddress extracts host:port from the plan's --handshake-address value,
-// defaulting to loopback on the contract port.
-func handshakeAddress(args []string) string {
-	for i, arg := range args {
-		value := ""
-		switch {
-		case arg == "--handshake-address" && i+1 < len(args):
-			value = args[i+1]
-		case strings.HasPrefix(arg, "--handshake-address="):
-			value = strings.TrimPrefix(arg, "--handshake-address=")
-		}
-		if value == "" {
-			continue
-		}
-		if _, rest, ok := strings.Cut(value, "://"); ok {
-			value = rest
-		}
-		if host, port, ok := strings.Cut(value, ":"); ok && host != "" && port != "" {
-			return host + ":" + port
-		}
-	}
-	return fmt.Sprintf("127.0.0.1:%d", names.HandshakePort)
 }
 
 // shellQuoteAll renders argv for a bash -c script, quoting every word so that

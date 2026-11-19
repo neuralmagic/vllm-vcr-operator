@@ -822,11 +822,13 @@ func TestMutateRejectsAPlanWithoutReadinessInputs(t *testing.T) {
 	}
 }
 
-// TestBackendWaitsForTheHandshakeBeforeStarting covers the cold-start ordering
+// TestBackendIsSupervisedInAContainerRestartLoop covers the cold-start ordering
 // fix: vllm-vcr gives up dialing the frontend after 30s and exits, while a Python
-// frontend needs tens of seconds to import torch and fetch tokenizer files. The
-// simulator therefore waits for the handshake socket, then execs its real argv.
-func TestBackendWaitsForTheHandshakeBeforeStarting(t *testing.T) {
+// frontend needs tens of seconds to import torch and fetch tokenizer files.
+// Kubelet restart backoff would stretch that to minutes, and probing the
+// handshake socket would occupy the accept queue the simulator's own connection
+// needs, so the simulator restarts itself in place.
+func TestBackendIsSupervisedInAContainerRestartLoop(t *testing.T) {
 	admission := testAdmission()
 	admission.Backend.Args = append(admission.Backend.Args,
 		"--handshake-address", "tcp://127.0.0.1:29550",
@@ -835,17 +837,20 @@ func TestBackendWaitsForTheHandshakeBeforeStarting(t *testing.T) {
 	mutated := mutate(t, workloadPod(), admission)
 	backend := containerByName(t, mutated.Spec.Containers, names.BackendContainerName)
 	if len(backend.Command) != 2 || backend.Command[0] != "/bin/bash" || backend.Command[1] != "-c" {
-		t.Fatalf("simulator command = %v, want a bash -c wait wrapper", backend.Command)
+		t.Fatalf("simulator command = %v, want a bash -c restart loop", backend.Command)
 	}
 	if len(backend.Args) != 1 {
 		t.Fatalf("simulator args = %v, want the wrapper script", backend.Args)
 	}
 	script := backend.Args[0]
-	if !strings.Contains(script, "/dev/tcp/127.0.0.1:29550") {
-		t.Errorf("wrapper does not wait for the handshake address from the plan:\n%s", script)
+	if !strings.HasPrefix(script, "while true; do ") {
+		t.Errorf("wrapper does not restart the simulator in place:\n%s", script)
 	}
-	if !strings.Contains(script, "exec 'vllm-vcr' 'play'") {
-		t.Errorf("wrapper does not exec the planned simulator argv:\n%s", script)
+	if strings.Contains(script, "/dev/tcp") {
+		t.Errorf("wrapper probes the handshake socket; a dial occupies the accept queue the real connection needs:\n%s", script)
+	}
+	if !strings.Contains(script, "'vllm-vcr' 'play'") {
+		t.Errorf("wrapper does not run the planned simulator argv:\n%s", script)
 	}
 	// A topic carrying a space and an apostrophe must survive the shell quoting.
 	if !strings.Contains(script, `'kv@pod name@Qwen/Qwen3-0.6B'`) {
