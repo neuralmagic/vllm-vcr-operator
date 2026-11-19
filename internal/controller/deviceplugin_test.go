@@ -109,6 +109,24 @@ func TestDevicePluginReconcilerCreatesDaemonSetAndDeviceCountConfigMap(t *testin
 		t.Errorf("container image = %q, want the injected image %q", container.Image, testDevicePluginImage)
 	}
 
+	// The plugin runs as a dedicated ServiceAccount so a platform can grant the
+	// kubelet-socket hostPath permission to this workload alone. On OpenShift that
+	// binding (hostmount-anyuid) is required: restricted-v2 rejects hostPath.
+	if podSpec.ServiceAccountName != names.DevicePluginServiceAccount {
+		t.Errorf("DaemonSet serviceAccountName = %q, want the dedicated %q",
+			podSpec.ServiceAccountName, names.DevicePluginServiceAccount)
+	}
+	serviceAccount := &corev1.ServiceAccount{}
+	if err := c.Get(context.Background(), types.NamespacedName{
+		Namespace: testOperatorNamespace,
+		Name:      names.DevicePluginServiceAccount,
+	}, serviceAccount); err != nil {
+		t.Fatalf("get the device plugin ServiceAccount: %v", err)
+	}
+	if serviceAccount.AutomountServiceAccountToken == nil || *serviceAccount.AutomountServiceAccountToken {
+		t.Error("the device plugin ServiceAccount automounts a token: the plugin never talks to the API server")
+	}
+
 	envVars := map[string]string{}
 	for _, envVar := range container.Env {
 		envVars[envVar.Name] = envVar.Value
@@ -191,6 +209,33 @@ func devicePluginVolumeName(t *testing.T, podSpec corev1.PodSpec, mountPath stri
 	}
 	t.Fatalf("no hostPath volume for %q in %+v", mountPath, podSpec.Volumes)
 	return ""
+}
+
+// TestDevicePluginReconcilerAdoptsServiceAccountOnExistingDaemonSet covers the
+// upgrade path: a DaemonSet created before the dedicated ServiceAccount existed
+// must gain it, otherwise the pod keeps running as "default" and a platform that
+// binds the hostPath permission to the dedicated account rejects it.
+func TestDevicePluginReconcilerAdoptsServiceAccountOnExistingDaemonSet(t *testing.T) {
+	env := testEnvironment()
+	reconciler, c := devicePluginReconciler(t, env)
+
+	// Seed the DaemonSet the way the previous release rendered it: no ServiceAccount.
+	if _, err := reconciler.Reconcile(context.Background(), env); err != nil {
+		t.Fatalf("seed Reconcile returned error: %v", err)
+	}
+	seeded := daemonSetOf(t, c)
+	seeded.Spec.Template.Spec.ServiceAccountName = ""
+	if err := c.Update(context.Background(), seeded); err != nil {
+		t.Fatalf("seed the legacy DaemonSet: %v", err)
+	}
+
+	if _, err := reconciler.Reconcile(context.Background(), env); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	updated := daemonSetOf(t, c)
+	if got := updated.Spec.Template.Spec.ServiceAccountName; got != names.DevicePluginServiceAccount {
+		t.Fatalf("serviceAccountName = %q, want the reconciler to adopt %q", got, names.DevicePluginServiceAccount)
+	}
 }
 
 func TestDevicePluginReconcilerUpdatesDaemonSetOnSpecChange(t *testing.T) {

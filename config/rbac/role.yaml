@@ -48,6 +48,20 @@ rules:
       - update
       - patch
       - delete
+  # The device-plugin DaemonSet runs as a dedicated ServiceAccount so a platform
+  # can grant kubelet's socket directory (hostPath) to that workload alone. On
+  # OpenShift the install script binds hostmount-anyuid to it.
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
   # Device-plugin reconciliation inspects node labels to avoid selecting a node
   # that already advertises nvidia.com/gpu from a real provider.
   - apiGroups:

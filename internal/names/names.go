@@ -22,6 +22,13 @@ const (
 	// device plugin.
 	DevicePluginName = "vllm-vcr-device-plugin"
 
+	// DevicePluginServiceAccount is the dedicated ServiceAccount the device
+	// plugin runs as. A dedicated account exists so a platform can grant it the
+	// narrowest permission that permits the kubelet socket hostPath (on
+	// OpenShift, hostmount-anyuid) without granting it to every Pod in the
+	// operator namespace.
+	DevicePluginServiceAccount = "vllm-vcr-device-plugin"
+
 	// DevicePluginSocketName is the unix socket the plugin registers on with
 	// kubelet, relative to the device-plugin directory.
 	DevicePluginSocketName = "vllm-vcr-gpu.sock"

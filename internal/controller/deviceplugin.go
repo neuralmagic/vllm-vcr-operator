@@ -122,6 +122,9 @@ func (r *DevicePluginReconciler) Reconcile(ctx context.Context, env *vcrv1alpha1
 		return DevicePluginState{}, fmt.Errorf("device plugin reconciliation requires a SimulationEnvironment")
 	}
 
+	if err := r.reconcileServiceAccount(ctx, env); err != nil {
+		return DevicePluginState{}, err
+	}
 	daemonSet, err := r.reconcileDaemonSet(ctx, env)
 	if err != nil {
 		return DevicePluginState{}, err
@@ -145,6 +148,55 @@ func (r *DevicePluginReconciler) Reconcile(ctx context.Context, env *vcrv1alpha1
 		state.Ready = 0
 	}
 	return state, nil
+}
+
+// reconcileServiceAccount ensures the dedicated device-plugin ServiceAccount
+// exists. The DaemonSet runs as this account so a platform can bind the narrowest
+// permission that permits kubelet's socket directory, instead of granting it to
+// every Pod in the operator namespace.
+func (r *DevicePluginReconciler) reconcileServiceAccount(ctx context.Context, env *vcrv1alpha1.SimulationEnvironment) error {
+	desired := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      names.DevicePluginServiceAccount,
+			Namespace: r.OperatorNamespace,
+			Labels:    devicePluginLabels(env),
+		},
+		AutomountServiceAccountToken: ptr.To(false),
+	}
+	if err := setEnvironmentOwner(env, desired, r.Client.Scheme()); err != nil {
+		return fmt.Errorf("set the device plugin ServiceAccount owner: %w", err)
+	}
+
+	existing := &corev1.ServiceAccount{}
+	key := types.NamespacedName{Namespace: desired.Namespace, Name: desired.Name}
+	if err := r.Client.Get(ctx, key, existing); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("get device plugin ServiceAccount %s: %w", key, err)
+		}
+		if err := r.Client.Create(ctx, desired); err != nil {
+			return fmt.Errorf("create device plugin ServiceAccount %s: %w", key, err)
+		}
+		return nil
+	}
+
+	before := existing.DeepCopy()
+	for k, v := range desired.Labels {
+		if existing.Labels == nil {
+			existing.Labels = map[string]string{}
+		}
+		existing.Labels[k] = v
+	}
+	existing.AutomountServiceAccountToken = desired.AutomountServiceAccountToken
+	if err := setEnvironmentOwner(env, existing, r.Client.Scheme()); err != nil {
+		return fmt.Errorf("set the device plugin ServiceAccount owner: %w", err)
+	}
+	if equality.Semantic.DeepEqual(before, existing) {
+		return nil
+	}
+	if err := r.Client.Update(ctx, existing); err != nil {
+		return fmt.Errorf("update device plugin ServiceAccount %s: %w", key, err)
+	}
+	return nil
 }
 
 // reconcileDaemonSet creates the DaemonSet when absent and otherwise merges the
@@ -196,6 +248,7 @@ func (r *DevicePluginReconciler) desiredDaemonSet(env *vcrv1alpha1.SimulationEnv
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
+					ServiceAccountName:            names.DevicePluginServiceAccount,
 					NodeSelector:                  env.Spec.NodeSelection.NodeSelector,
 					Tolerations:                   env.Spec.NodeSelection.Tolerations,
 					Affinity:                      realGPUProviderExclusion(),
@@ -257,7 +310,16 @@ func (r *DevicePluginReconciler) desiredContainer(env *vcrv1alpha1.SimulationEnv
 			AllowPrivilegeEscalation: ptr.To(false),
 			ReadOnlyRootFilesystem:   ptr.To(true),
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+			// No explicit seccompProfile: some SCCs refuse one, and an unset profile
+			// is the platform default.
+			//
+			// spc_t is required on an SELinux-enforcing node: kubelet's socket lives
+			// in kubelet_var_lib_t, which the default container_t type cannot connect
+			// to. The NVIDIA device plugin needs the same permission. The plugin
+			// still requests no device, no NVIDIA runtime, and no capability: this
+			// container-level label is about reaching kubelet's socket, not about
+			// GPUs. On clusters without SELinux the label is inert.
+			SELinuxOptions: &corev1.SELinuxOptions{Type: "spc_t"},
 		},
 	}
 }
@@ -443,6 +505,10 @@ func mergeDaemonSet(existing, desired *appsv1.DaemonSet, env *vcrv1alpha1.Simula
 	template.Labels = mergeStringMap(template.Labels, desired.Spec.Template.Labels)
 
 	pod, desiredPod := &template.Spec, &desired.Spec.Template.Spec
+	// The ServiceAccount is part of the operator-managed identity: without it the
+	// pod falls back to "default", which on OpenShift is not bound to the SCC that
+	// permits kubelet's socket directory.
+	pod.ServiceAccountName = desiredPod.ServiceAccountName
 	pod.NodeSelector = desiredPod.NodeSelector
 	pod.Tolerations = desiredPod.Tolerations
 	pod.Affinity = desiredPod.Affinity

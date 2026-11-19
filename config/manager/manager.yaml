@@ -35,10 +35,12 @@ spec:
       # Admission must keep answering while the leader drains, so the grace period
       # covers webhook shutdown rather than only the reconcile loop.
       terminationGracePeriodSeconds: 20
+      # No fixed UID/GID: platforms that assign a UID range (OpenShift SCCs
+      # allocate from a per-namespace range and reject a hardcoded 65532) must be
+      # able to choose it, while clusters without such a mechanism fall back to
+      # the image's own non-root user. runAsNonRoot still forbids root.
       securityContext:
         runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
