@@ -196,3 +196,22 @@ signal semantics; the advertised `vllm_version`.
 A drift the operator does not adapt is a finding to report, not a check to
 weaken: the `flags` and `compat` surfaces stay strict even when they are
 inconvenient.
+
+## Bumping the release
+
+`hack/bump-vllm.sh` automates the mechanical half of moving to a newer vLLM:
+
+```bash
+hack/bump-vllm.sh                 # report only: what the bump would change
+hack/bump-vllm.sh --to 0.34.0 --apply
+```
+
+It reads vllm-vcr's `compat.toml` to find the supported line, checks that the CPU
+frontend image exists for the target release, resolves the versioned simulator
+image tag for that line, and rewrites the pins (`internal/names`, this directory's
+`hack/vllm-vcr-pin.env`, manager image defaults, this document). It will not
+rewrite `internal/vllm`: that package encodes the release's flag spellings,
+defaults and config-file semantics, which only a person can re-derive from the new
+release's argparse definitions. It fails the gates until that is done, and it
+refuses to bump at all when no simulator build exists for the target line, because
+the frontend and simulator must speak the same engine-core protocol.
