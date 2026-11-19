@@ -860,3 +860,38 @@ func TestBackendIsSupervisedInAContainerRestartLoop(t *testing.T) {
 		t.Errorf("wrapper contains a double escape, single-quote escaping is wrong:\n%s", script)
 	}
 }
+
+// TestBackendGetsDownwardAPIPodIdentity proves the simulator can expand the
+// $(POD_NAME) and $(POD_IP) placeholders its engine id and KV-event topic use:
+// kubelet only expands variables that exist in the container environment, and a
+// workload that never defined them would otherwise receive literal "$(POD_IP)".
+func TestBackendGetsDownwardAPIPodIdentity(t *testing.T) {
+	admission := testAdmission()
+	pod := workloadPod()
+	for _, container := range pod.Spec.Containers {
+		kept := container.Env[:0]
+		for _, entry := range container.Env {
+			if entry.Name != "POD_NAME" && entry.Name != "POD_IP" {
+				kept = append(kept, entry)
+			}
+		}
+		container.Env = kept
+	}
+
+	mutated := mutate(t, pod, admission)
+	backend := containerByName(t, mutated.Spec.Containers, names.BackendContainerName)
+	for name, field := range map[string]string{"POD_NAME": "metadata.name", "POD_IP": "status.podIP"} {
+		var found bool
+		for _, entry := range backend.Env {
+			if entry.Name == name {
+				found = true
+				if entry.ValueFrom == nil || entry.ValueFrom.FieldRef == nil || entry.ValueFrom.FieldRef.FieldPath != field {
+					t.Fatalf("%s = %+v, want fieldRef %s", name, entry, field)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s is missing: the placeholder would never expand", name)
+		}
+	}
+}

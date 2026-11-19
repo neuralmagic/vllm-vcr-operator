@@ -42,3 +42,13 @@ simulator before serving HTTP.
 
 Latency or throughput fidelity (the profile is a mock), recorded-token replay,
 KV-event replay, llm-d routing. Those remain gated on real profile production.
+
+## KV events (llm-d prerequisite)
+
+With a workload that passes `--kv-events-config`, the simulator binds
+`tcp://0.0.0.0:5556` and publishes under `kv@<pod-ip>:<inference-port>@<model>`,
+the identity llm-d's precise-prefix-cache producer discovers engines by. Both the
+topic and the engine id are kubelet-expanded `$(POD_IP)`/`$(POD_NAME)`
+placeholders: at admission a controller-created Pod has neither a name nor an IP,
+and llm-d attributes events by Pod IP and port, so a process-local engine id would
+never match.

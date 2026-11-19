@@ -456,6 +456,31 @@ func mergeResources(sizing, original corev1.ResourceRequirements) corev1.Resourc
 // connection needs, and a successful dial never proved an engine was registered.
 const backendRestartDelaySeconds = 2
 
+// ensurePodIdentityEnv guarantees the downward-API variables the simulator's
+// engine id and KV-event topic are built from. Kubelet expands $(VAR) references
+// in args only for variables present in the container's environment, and a
+// controller-created Pod has neither a name nor an IP at admission time, so the
+// placeholders are the only correct identity source. A workload that already
+// defines them keeps its own definitions.
+func ensurePodIdentityEnv(env []corev1.EnvVar) []corev1.EnvVar {
+	have := map[string]bool{}
+	for _, entry := range env {
+		have[entry.Name] = true
+	}
+	add := func(name, field string) {
+		if have[name] {
+			return
+		}
+		env = append(env, corev1.EnvVar{
+			Name:      name,
+			ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: field}},
+		})
+	}
+	add("POD_NAME", "metadata.name")
+	add("POD_IP", "status.podIP")
+	return env
+}
+
 // backendCommand returns the simulator's command and arguments, wrapped in a
 // restart loop so a cold frontend does not cost a container restart.
 func backendCommand(admission *plan.Admission) ([]string, []string) {
@@ -490,7 +515,7 @@ func backendContainer(admission *plan.Admission) (corev1.Container, error) {
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         command,
 		Args:            args,
-		Env:             append([]corev1.EnvVar(nil), backend.Env...),
+		Env:             ensurePodIdentityEnv(append([]corev1.EnvVar(nil), backend.Env...)),
 		Ports:           append([]corev1.ContainerPort(nil), backend.Ports...),
 		Resources:       *admission.Resources.Backend.DeepCopy(),
 		// Readiness is the control API, which is also the supervisor's backend

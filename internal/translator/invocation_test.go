@@ -31,6 +31,9 @@ func TestBackendArgumentsAreSimulatorFlags(t *testing.T) {
 		"--max-num-batched-tokens", "8192",
 		"--long-prefill-token-threshold", "4096",
 		"--scheduling-policy", "fcfs",
+		// The Pod name is unknown at admission for a controller-created Pod, so the
+		// engine id is the kubelet-expanded placeholder.
+		"--engine-id", "$(POD_NAME)",
 		"--latency-trace", "/var/run/vcr/profile/trace.jsonl.gz",
 		// The trace header carries a bare lowercase-hex hash and the simulator
 		// compares it verbatim (upstream src/lib.rs:626-631), so the profile
@@ -207,16 +210,16 @@ func TestContentReplayFollowsTheProfileCapability(t *testing.T) {
 	})
 }
 
-// TestKVEventTopicNeedsPodIdentity asserts the llm-d topic is built from the Pod
-// identity, and that its absence is reported rather than silently defaulted.
-func TestKVEventTopicNeedsPodIdentity(t *testing.T) {
+// TestKVEventTopicUsesDownwardAPIIdentity asserts the llm-d topic names the
+// identity llm-d discovers engines by - Pod IP and serving port - and that it is a
+// kubelet-expanded placeholder, because a controller-created Pod has neither a
+// name nor an IP when admission runs.
+func TestKVEventTopicUsesDownwardAPIIdentity(t *testing.T) {
 	args := []string{"--kv-events-config", `{"enable_kv_cache_events":true}`}
 	admission, err := runTranslate(t, translateCase{name: "no identity", args: args}, testEnvironment())
 	mustAccept(t, admission, err)
-	rejectArgs(t, "backend", admission.Backend.Command, "--kv-events-topic")
-	if !warningsContain(admission, "derives the KV-event topic") {
-		t.Errorf("warnings %v do not explain the derived topic", admission.Warnings)
-	}
+	requireArgs(t, "backend", admission.Backend.Command, "--kv-events-topic", "kv@$(POD_IP):8000@"+testModel)
+	requireArgs(t, "backend", admission.Backend.Command, "--engine-id", "$(POD_NAME)")
 }
 
 // TestWorkloadKVEventEndpointIsPreserved asserts a concrete endpoint is forwarded

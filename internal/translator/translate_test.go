@@ -225,7 +225,7 @@ func TestSettingsPolicyFamilies(t *testing.T) {
 			check: func(t *testing.T, a *plan.Admission) {
 				requireArgs(t, "backend", a.Backend.Command, "--enable-kv-cache-events")
 				requireArgs(t, "backend", a.Backend.Command, "--kv-events-endpoint", "tcp://*:5556")
-				requireArgs(t, "backend", a.Backend.Command, "--kv-events-topic", "kv@pod-1@"+testModel)
+				requireArgs(t, "backend", a.Backend.Command, "--kv-events-topic", "kv@$(POD_IP):8000@"+testModel)
 			}},
 		{name: "kv events for a profile without events are rejected",
 			args:        []string{"--kv-events-config", `{"enable_kv_cache_events":true}`},

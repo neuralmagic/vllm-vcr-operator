@@ -379,14 +379,28 @@ func resolveKVEvents(cfg *vllm.Config, metadata *profile.Metadata, req Request, 
 	}
 	if topic := stringValue(events.Topic); strings.TrimSpace(topic) != "" {
 		out.topic = topic
-	} else if identity := strings.TrimSpace(req.PodIdentity); identity != "" {
-		out.topic = fmt.Sprintf("kv@%s@%s", identity, modelName(cfg))
 	} else {
-		warnings = append(warnings, fmt.Sprintf(
-			"%s: no Pod identity was supplied, so the simulator derives the KV-event topic from its engine id instead of the llm-d form kv@<pod>@<model>",
-			setting))
+		// llm-d's precise-prefix-cache producer discovers engines by Pod IP and
+		// serving port, so the topic must name that identity. It cannot be resolved
+		// at admission time - a controller-created Pod has no name yet and no IP
+		// until it is scheduled - so the placeholders are expanded by kubelet from
+		// the downward-API environment the runtime guarantees.
+		out.topic = fmt.Sprintf("kv@%s@%s", podIdentityPlaceholder(cfg, req), modelName(cfg))
 	}
 	return out, warnings, rejections
+}
+
+// podIdentityPlaceholder is the identity llm-d uses to attribute KV events to an
+// engine: the Pod IP and serving port, or the Pod name when no port is known.
+// Both are kubelet-expanded placeholders, never literal values.
+func podIdentityPlaceholder(cfg *vllm.Config, req Request) string {
+	if port := cfg.Server.Port; port != nil && *port > 0 {
+		return fmt.Sprintf("$(POD_IP):%d", *port)
+	}
+	if identity := strings.TrimSpace(req.PodIdentity); identity != "" {
+		return identity
+	}
+	return "$(POD_NAME)"
 }
 
 // resolveKVTransfer resolves the P/D role of the simulated engine. The setting is

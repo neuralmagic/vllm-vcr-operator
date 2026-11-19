@@ -3,6 +3,7 @@ package translator
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -105,6 +106,12 @@ func frontendInvocation(cfg *vllm.Config, eff effective, env Environment, preser
 // the frontend, and the simulator records timing and tokens.
 func backendInvocation(cfg *vllm.Config, eff effective, env Environment, metadata *profile.Metadata, podIdentity string) plan.Invocation {
 	trace := resolveRecordedTrace(metadata)
+	// A controller-created Pod has no name at admission time: the API server
+	// generates it. The engine id is therefore a kubelet-expanded placeholder that
+	// the runtime guarantees through the downward API.
+	if strings.TrimSpace(podIdentity) == "" {
+		podIdentity = "$(POD_NAME)"
+	}
 	input := SimulatorInput{
 		HandshakeAddress:    handshakeAddress(eff),
 		ModelName:           modelName(cfg),
