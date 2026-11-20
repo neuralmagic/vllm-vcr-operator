@@ -49,9 +49,10 @@ device_plugin_image="$prefix/vllm-vcr-device-plugin:$tag"
 frontend_stub_image="$prefix/vllm-vcr-frontend-stub:$tag"
 backend_stub_image="$prefix/vllm-vcr-backend-stub:$tag"
 profile_fixture_image="$prefix/vllm-vcr-profile-fixture:$tag"
+mock_profile_image="$prefix/vllm-vcr-profile-mock:$tag"
 
 operator_images=("$manager_image" "$device_plugin_image")
-stub_images=("$frontend_stub_image" "$backend_stub_image" "$profile_fixture_image")
+stub_images=("$frontend_stub_image" "$backend_stub_image" "$profile_fixture_image" "$mock_profile_image")
 
 build=false
 stub=false
@@ -125,6 +126,7 @@ if [[ "$stub" == true ]]; then
   build_image "$frontend_stub_image" test/images/frontend-stub/Dockerfile
   build_image "$backend_stub_image" test/images/backend-stub/Dockerfile
   build_image "$profile_fixture_image" test/images/profile-fixture/Dockerfile
+  build_image "$mock_profile_image" test/images/mock-profile/Dockerfile
 fi
 
 if [[ "$load" == true ]]; then
