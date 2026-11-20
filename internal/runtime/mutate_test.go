@@ -836,8 +836,8 @@ func TestBackendIsSupervisedInAContainerRestartLoop(t *testing.T) {
 
 	mutated := mutate(t, workloadPod(), admission)
 	backend := containerByName(t, mutated.Spec.Containers, names.BackendContainerName)
-	if len(backend.Command) != 2 || backend.Command[0] != "/bin/bash" || backend.Command[1] != "-c" {
-		t.Fatalf("simulator command = %v, want a bash -c restart loop", backend.Command)
+	if len(backend.Command) != 2 || backend.Command[0] != "/bin/sh" || backend.Command[1] != "-c" {
+		t.Fatalf("simulator command = %v, want a POSIX sh -c restart loop", backend.Command)
 	}
 	if len(backend.Args) != 1 {
 		t.Fatalf("simulator args = %v, want the wrapper script", backend.Args)

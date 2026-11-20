@@ -42,8 +42,9 @@ files — tens of seconds on a real image. Two consequences are part of the
 contract:
 
 - The simulator must not exit while the handshake is absent. `vllm-vcr` gives up
-  after 30s of dialing, so the runtime prefixes its command with a bounded wait
-  for the handshake socket and then `exec`s the planned argv.
+  after 30s of dialing, so the runtime runs its command in a POSIX-shell restart
+  loop (`/bin/sh -c`, `sleep`). The simulator image therefore has to provide
+  `/bin/sh` and `sleep`; it does not have to provide bash.
 - The supervisor must not treat an unhealthy simulator that has never been healthy
   as a lost backend. It keeps the frontend alive for `--backend-startup-timeout`
   (default 5m) and only reports readiness when both inputs answer. A simulator

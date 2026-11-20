@@ -489,7 +489,9 @@ func backendCommand(admission *plan.Admission) ([]string, []string) {
 	script := fmt.Sprintf(
 		"while true; do %s; echo 'vcr-backend: simulator exited, restarting in %ds'; sleep %d; done",
 		shellQuoteAll(argv), backendRestartDelaySeconds, backendRestartDelaySeconds)
-	return []string{"/bin/bash", "-c"}, []string{script}
+	// POSIX shell only: the simulator image contract requires /bin/sh and sleep, not
+	// bash. Requiring bash would silently exclude images that are otherwise fine.
+	return []string{"/bin/sh", "-c"}, []string{script}
 }
 
 // shellQuoteAll renders argv for a bash -c script, quoting every word so that
