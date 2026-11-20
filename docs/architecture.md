@@ -83,12 +83,15 @@ Pod, and the init container exports the trace. No match, no admission.
   signal — the frontend binds it, so a dial proves nothing.
 - **Cold start** is the hard part: a real frontend needs ~40s to import torch and
   fetch tokenizer files, while `vllm-vcr` gives up dialing after 30s. The
-  simulator now restarts itself in place every 2s, and the supervisor keeps the
-  frontend alive for a startup budget (5m) instead of treating "never healthy" as
-  "lost". After the simulator has been healthy once, losing it for 5s terminates
-  the frontend and the Pod restarts as a unit.
-- Recovery is restart-based, not reconnect-based, because the handshake is
-  one-shot.
+  simulator runs under a POSIX-shell restart loop, so it retries the process in
+  place every 2s instead of paying kubelet's restart backoff, and the supervisor
+  keeps the frontend alive for a startup budget (5m) instead of treating "never
+  healthy" as "lost".
+- The trade-off is explicit: a simulator crash that recovers within the 5s loss
+  grace costs no restart and leaves the container restart count at 0; an outage
+  longer than the grace terminates the frontend, and the Pod restarts as a unit.
+  Recovery is restart-based, not reconnect-based — the wrapper runs a fresh
+  simulator process, not a resumed session.
 
 ## Synthetic GPUs
 

@@ -45,6 +45,12 @@ contract:
   after 30s of dialing, so the runtime runs its command in a POSIX-shell restart
   loop (`/bin/sh -c`, `sleep`). The simulator image therefore has to provide
   `/bin/sh` and `sleep`; it does not have to provide bash.
+- The wrapper restarts the simulator **process** in place, so a crash does not
+  appear as a container restart count and kubelet never enters restart backoff for
+  a cold start. A simulator that stays unavailable longer than the loss grace still
+  causes the supervisor to terminate the frontend, which restarts the Pod as a
+  unit; a simulator that recovers inside the grace costs no restart at all. Every
+  in-place restart is logged by the wrapper.
 - The supervisor must not treat an unhealthy simulator that has never been healthy
   as a lost backend. It keeps the frontend alive for `--backend-startup-timeout`
   (default 5m) and only reports readiness when both inputs answer. A simulator

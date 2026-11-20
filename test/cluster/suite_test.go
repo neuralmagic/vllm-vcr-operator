@@ -312,8 +312,14 @@ func (s *suite) stepAdmission(t *testing.T) {
 	if backend.Image != s.images.backendStub {
 		t.Errorf("backend image = %q, want the operator's configured %q", backend.Image, s.images.backendStub)
 	}
-	if len(backend.Command) < 2 || backend.Command[0] != "vllm-vcr" || backend.Command[1] != "play" {
-		t.Errorf("backend command = %v, want the vllm-vcr play invocation", backend.Command)
+	// The simulator runs inside a POSIX-shell restart loop, so its command is the
+	// wrapper and the vllm-vcr invocation lives in the script. A cold start makes
+	// vllm-vcr give up after 30s; restarting in place avoids kubelet backoff.
+	if len(backend.Command) != 2 || backend.Command[0] != "/bin/sh" || backend.Command[1] != "-c" {
+		t.Fatalf("backend command = %v, want the sh -c restart wrapper", backend.Command)
+	}
+	if script := strings.Join(backend.Args, " "); !strings.Contains(script, "'vllm-vcr' 'play'") {
+		t.Errorf("backend wrapper does not run vllm-vcr play: %s", script)
 	}
 
 	provisioner := initContainerByName(pod, names.ProvisionerContainerName)
@@ -794,9 +800,9 @@ func (s *suite) stepReadinessWithdrawal(t *testing.T) {
 	}
 
 	// The supervisor terminates the frontend once the backend loss exceeds its grace
-	// period, and kubelet's restart policy is what brings the container back. The
-	// simulator is never restarted by the supervisor: it is kubelet's container, not
-	// the supervisor's child.
+	// period, and kubelet's restart policy is what brings the frontend container back.
+	// The simulator is never restarted by the supervisor: it is kubelet's container,
+	// not the supervisor's child.
 	err = waitFor(ctx, 120*time.Second, 2*time.Second, func(ctx context.Context) (bool, string, error) {
 		var current corev1.Pod
 		if err := s.client.Get(ctx, client.ObjectKeyFromObject(subject), &current); err != nil {
@@ -832,27 +838,31 @@ func (s *suite) stepReadinessWithdrawal(t *testing.T) {
 		t.Fatalf("the Pod did not become Ready again after the simulator recovered: %v", err)
 	}
 
-	// Finally, force the simulator container down and observe kubelet restarting it:
-	// the container's restart policy, not the supervisor, owns the simulator's life.
+	// Finally, crash the simulator and observe the documented recovery: the
+	// simulator process is restarted in place by its POSIX-shell wrapper, so the
+	// container (and the Pod) are not replaced. This is what absorbs a cold start
+	// without paying kubelet's restart backoff; the cost is that a crash does not
+	// show up as a container restart count.
 	var beforeCrash corev1.Pod
 	if err := s.client.Get(ctx, client.ObjectKeyFromObject(subject), &beforeCrash); err != nil {
 		t.Fatalf("read the Pod before crashing the simulator: %v", err)
 	}
+	uidBefore := beforeCrash.UID
 	restartsBefore := restartCount(&beforeCrash, names.BackendContainerName)
-	// The hook makes the simulator container exit, so a non-zero command status is the
-	// expected outcome; the observable fact is kubelet restarting the container.
 	s.execInPodIgnoringError(t, subject, names.FrontendContainerName, "wget", "-qO-", controlURL+"/stub/exit")
-	err = waitFor(ctx, 2*time.Minute, 2*time.Second, func(ctx context.Context) (bool, string, error) {
-		var current corev1.Pod
-		if err := s.client.Get(ctx, client.ObjectKeyFromObject(subject), &current); err != nil {
-			return false, "", err
-		}
-		return restartCount(&current, names.BackendContainerName) > restartsBefore, fmt.Sprintf(
-			"simulator restarts %d (was %d)", restartCount(&current, names.BackendContainerName), restartsBefore), nil
-	})
-	if err != nil {
-		s.dumpClusterState(t, "readiness-withdrawal")
-		t.Fatalf("kubelet did not restart the simulator container after it exited non-zero: %v", err)
+
+	// The restarted simulator serves its control API again: in-place recovery is
+	// observable without the container being recreated.
+	s.execInPodEventually(t, subject, names.BackendContainerName, "wget", "-qO-", controlURL+"/stats")
+	var afterCrash corev1.Pod
+	if err := s.client.Get(ctx, client.ObjectKeyFromObject(subject), &afterCrash); err != nil {
+		t.Fatalf("read the Pod after the crash: %v", err)
+	}
+	if afterCrash.UID != uidBefore {
+		t.Errorf("the Pod was replaced (%s -> %s): the wrapper restarts the simulator process, not the Pod", uidBefore, afterCrash.UID)
+	}
+	if got := restartCount(&afterCrash, names.BackendContainerName); got != restartsBefore {
+		t.Errorf("simulator container restarts %d (was %d): the wrapper restarts the process in place", got, restartsBefore)
 	}
 
 	if err := s.deleteNamespaceNow(t, capacityNamespace); err != nil {
