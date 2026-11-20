@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	jsonpatch "gomodules.xyz/jsonpatch/v2"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/rejection"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/runtime"
 	"github.com/opendatahub-io/vllm-vcr-operator/internal/translator"
@@ -41,6 +43,23 @@ type PodMutator struct {
 	backendImage      string
 	now               func() time.Time
 	recorder          record.EventRecorder
+
+	// events decouples admission from the event sink. A synchronous Event call can
+	// block (a full recorder queue stalls the API server's admission round trip),
+	// and an admission decision must never depend on telemetry. The queue is
+	// bounded and drops under pressure; the log line already carries the decision.
+	events chan recordedEvent
+}
+
+// recordedEvent is one queued event, kept as plain values so the queue never holds
+// references to objects the API server may still be defaulting.
+type recordedEvent struct {
+	namespace   string
+	podName     string
+	generateRef string
+	eventType   string
+	reason      string
+	message     string
 }
 
 // NewPodMutator builds a Pod mutator from opts and validates the settings that
@@ -50,7 +69,7 @@ func NewPodMutator(opts Options) (*PodMutator, error) {
 		return nil, err
 	}
 	opts = opts.resolved()
-	return &PodMutator{
+	m := &PodMutator{
 		client:            opts.Client,
 		reader:            opts.Reader,
 		operatorNamespace: opts.OperatorNamespace,
@@ -58,7 +77,13 @@ func NewPodMutator(opts Options) (*PodMutator, error) {
 		backendImage:      opts.BackendImage,
 		now:               opts.Now,
 		recorder:          opts.Recorder,
-	}, nil
+		events:            make(chan recordedEvent, eventQueueDepth),
+	}
+	// The forwarder is process-lifetime: the mutator lives as long as the manager,
+	// and tests are short-lived processes. It is what keeps a slow event sink off
+	// the admission path.
+	go m.drainEvents()
+	return m, nil
 }
 
 // Handle implements the controller-runtime admission handler interface.
@@ -73,6 +98,7 @@ func (m *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 // with the JSON patch that installs the simulated runtime layout.
 func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionRequest) *admissionv1.AdmissionResponse {
 	log := ctrl.LoggerFrom(ctx)
+	dryRunRequest := req.DryRun != nil && *req.DryRun
 	if req == nil {
 		return operatorDenied("the admission request is empty")
 	}
@@ -110,13 +136,13 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 	env, denial := m.environment(ctx)
 	if denial != nil {
 		m.recordOperatorProblem(nil, log, denial.detail)
-		return denial.response()
+		return m.deny(pod, log, dryRunRequest, denial)
 	}
 	catalog, err := catalogFor(env)
 	if err != nil {
 		denial := operatorFailure("%v", err)
 		m.recordOperatorProblem(env, log, denial.detail)
-		return denial.response()
+		return m.deny(pod, log, dryRunRequest, denial)
 	}
 
 	config, err := vllm.Resolve(vllm.Invocation{
@@ -125,11 +151,12 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 	})
 	if err != nil {
 		if denial := rejectionDenial(err); denial != nil {
-			return denial.response()
+			return m.deny(pod, log, dryRunRequest, denial)
 		}
 		// internal/vllm reports everything it can establish safely; anything else
 		// is an operator-side failure, not something the user can fix.
-		return operatorDenied(fmt.Sprintf("the workload invocation cannot be resolved: %v", err))
+		return m.deny(pod, log, dryRunRequest,
+			operatorFailure("the workload invocation cannot be resolved: %v", err))
 	}
 
 	admitted, err := translator.Translate(translator.Request{
@@ -147,12 +174,12 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 		if denial == nil {
 			denial = operatorFailure("%v", err)
 		}
-		return denial.response()
+		return m.deny(pod, log, dryRunRequest, denial)
 	}
 
 	mutated, err := runtime.Mutate(pod, admitted)
 	if err != nil {
-		return workloadFailure("%s", trimErrorPrefix(err, "runtime")).response()
+		return m.deny(pod, log, dryRunRequest, workloadFailure("%s", trimErrorPrefix(err, "runtime")))
 	}
 
 	// Pull-secret projection is the only side effect of admission, and only a real
@@ -163,7 +190,7 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 	if err != nil {
 		denial := operatorFailure("%v", err)
 		m.recordOperatorProblem(env, log, denial.detail)
-		return denial.response()
+		return m.deny(pod, log, dryRunRequest, denial)
 	}
 	if projected != "" {
 		addPullSecret(mutated, projected)
@@ -173,14 +200,115 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 	if err != nil {
 		denial := operatorFailure("%v", err)
 		m.recordOperatorProblem(env, log, denial.detail)
-		return denial.response()
+		return m.deny(pod, log, dryRunRequest, denial)
 	}
 	if len(patch) == 0 {
 		return allowed()
 	}
+	m.recordInjection(log, pod, admitted, dryRun, len(patch))
 	response := allowedWithPatch(patch, admissionv1.PatchTypeJSONPatch)
 	response.Warnings = admitted.Warnings
 	return response
+}
+
+// maxEventMessage bounds event text: the API server rejects messages over 1KB and
+// a rejection that cannot be recorded is worse than a shortened one.
+const maxEventMessage = 900
+
+// eventQueueDepth bounds queued events. Admission drops instead of blocking past
+// this depth; the decision is logged either way.
+const eventQueueDepth = 512
+
+// deny records a refusal and returns its admission response.
+//
+// Every denial is logged and, unless the request is a dry run, evented: a test
+// author sees the reason in `kubectl describe pod` (or on the namespace for a
+// controller-created Pod whose name the API server has not generated yet), and the
+// operator log carries the same decision for whoever debugs the webhook.
+func (m *PodMutator) deny(pod *corev1.Pod, log logr.Logger, dryRun bool, denial *admissionDenial) *admissionv1.AdmissionResponse {
+	detail := truncate(denial.detail, maxEventMessage)
+	log.Info("admission denied", "namespace", pod.Namespace, "pod", podName(pod),
+		"reason", detail)
+	if !dryRun {
+		m.event(pod, corev1.EventTypeWarning, "SimulationRejected", detail)
+	}
+	return denial.response()
+}
+
+// recordInjection logs an accepted translation and, unless the request is a dry
+// run, announces it. The event names the profile and its digest, which is the
+// identity a test can assert on without reading annotations.
+func (m *PodMutator) recordInjection(log logr.Logger, pod *corev1.Pod, admitted *plan.Admission, dryRun bool, patchSize int) {
+	profileID, digest := admitted.Profile.ID, admitted.Profile.Digest
+	log.Info("admission translated the workload for simulation",
+		"namespace", pod.Namespace, "pod", podName(pod),
+		"profile", profileID, "profileDigest", digest,
+		"model", admitted.Model.Reference(),
+		"gpuDevices", admitted.GPUDevices,
+		"frontendImage", admitted.Frontend.Image, "backendImage", admitted.Backend.Image,
+		"warnings", len(admitted.Warnings), "patchBytes", patchSize, "dryRun", dryRun)
+	if dryRun {
+		return
+	}
+	message := fmt.Sprintf("serving simulated with profile %s (%s); model %s; %d GPU device(s)",
+		profileID, digest, admitted.Model.Reference(), admitted.GPUDevices)
+	if len(admitted.Warnings) > 0 {
+		message += fmt.Sprintf("; %d warning(s)", len(admitted.Warnings))
+	}
+	m.event(pod, corev1.EventTypeNormal, "SimulationInjected", truncate(message, maxEventMessage))
+}
+
+// event emits an event for the Pod, or for its namespace when the Pod has no name
+// yet: a controller-created Pod carries generateName, and an event needs a real
+// involved-object name.
+func (m *PodMutator) event(pod *corev1.Pod, eventType, reason, message string) {
+	if m.recorder == nil {
+		return
+	}
+	queued := recordedEvent{
+		namespace:   pod.Namespace,
+		podName:     pod.Name,
+		generateRef: pod.GenerateName,
+		eventType:   eventType,
+		reason:      reason,
+		message:     message,
+	}
+	select {
+	case m.events <- queued:
+	default:
+		// Dropping is deliberate: the decision is already logged with the same
+		// detail, and blocking admission to record an event would be worse.
+	}
+}
+
+// drainEvents forwards queued events to the recorder until the queue closes. It
+// runs in its own goroutine so a slow sink cannot delay admission.
+func (m *PodMutator) drainEvents() {
+	for queued := range m.events {
+		if queued.podName != "" {
+			pod := &corev1.Pod{}
+			pod.Namespace, pod.Name = queued.namespace, queued.podName
+			m.recorder.Event(pod, queued.eventType, queued.reason, queued.message)
+			continue
+		}
+		namespace := &corev1.Namespace{}
+		namespace.Name = queued.namespace
+		m.recorder.Event(namespace, queued.eventType, queued.reason, queued.message)
+	}
+}
+
+func podName(pod *corev1.Pod) string {
+	if pod.Name != "" {
+		return pod.Name
+	}
+	return pod.GenerateName + "*"
+}
+
+func truncate(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "…"
 }
 
 // rejectionDenial renders a structured rejection as a workload denial, or nil when

@@ -44,6 +44,11 @@ type Model struct {
 	Tokenizer         string `json:"tokenizer,omitempty"`
 	TokenizerRevision string `json:"tokenizerRevision,omitempty"`
 	ChatTemplateHash  string `json:"chatTemplateHash,omitempty"`
+	// VocabSize is the model's tokenizer vocabulary size. The simulator samples
+	// random token ids in [0, vocab_size); the default (32000) is smaller than many
+	// modern vocabularies but larger than some, and an out-of-range id makes
+	// detokenization fail. 0 means "not declared": the simulator default applies.
+	VocabSize int `json:"vocabSize,omitempty"`
 }
 
 // GPU identifies the recorded accelerator and the device count the capture used.

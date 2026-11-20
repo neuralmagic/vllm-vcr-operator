@@ -17,7 +17,10 @@ metadata:
     app.kubernetes.io/component: manager
     control-plane: controller-manager
 spec:
-  replicas: 1
+  # Two replicas. The controllers run on the leader only (--leader-elect), but the
+  # admission webhook server runs in every replica, so a rolling update or a lost
+  # Pod cannot leave the fail-closed Pod webhook without a backend.
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: vllm-vcr-operator

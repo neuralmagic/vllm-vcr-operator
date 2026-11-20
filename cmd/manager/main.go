@@ -70,6 +70,12 @@ func main() {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
+	// With more than one replica the admission Service load-balances across them,
+	// so a replica must not report Ready until its webhook server is serving.
+	if err := mgr.AddReadyzCheck("webhook-server", mgr.GetWebhookServer().StartedChecker()); err != nil {
+		setupLog.Error(err, "unable to set up webhook readiness check")
+		os.Exit(1)
+	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
@@ -87,6 +93,18 @@ func main() {
 	}
 	if err := environmentReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to register the simulation environment reconciler")
+		os.Exit(1)
+	}
+
+	// Admission writes the projected pull Secret, and this sweep keeps it right:
+	// rotated sources reach every copy and copies whose Pods are gone disappear.
+	if err := mgr.Add(&controller.ProjectedSecretReconciler{
+		Client:            mgr.GetClient(),
+		Reader:            mgr.GetAPIReader(),
+		OperatorNamespace: operatorNS,
+		Log:               ctrl.Log.WithName("projected-secrets"),
+	}); err != nil {
+		setupLog.Error(err, "unable to register the projected pull-secret reconciler")
 		os.Exit(1)
 	}
 

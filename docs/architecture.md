@@ -117,6 +117,25 @@ both expanded by kubelet, because a controller-created Pod has neither a name no
 an IP when admission runs, and llm-d attributes events by Pod IP and port. The
 runtime injects those downward-API variables so the placeholders actually expand.
 
+## Operating behaviour
+
+- **Every decision is visible.** Accepted translations and refusals are logged and
+  fired as events (`SimulationInjected`, `SimulationRejected`) on the Pod, or on
+  its namespace when a controller-created Pod has no name yet. Events are queued
+  and dropped under pressure rather than blocking admission.
+- **Admission survives replica loss.** Two manager replicas run; controllers act
+  only on the leader, but every replica serves admission, and a PDB keeps one
+  up during drains. A replica reports Ready only once its webhook server serves.
+- **Projected pull secrets are reconciled, not just created.** A sweep refreshes
+  copies when a source Secret rotates and deletes copies no Pod references, so
+  workload namespaces do not accumulate stale credentials.
+- **An empty `simulationNodes.nodeSelector` follows Kubernetes semantics and
+  selects every node**, including control planes; real-GPU nodes are still
+  excluded, and the reconciler warns with an `AllNodesSelected` event.
+- **Vocabulary size comes from the profile.** The simulator samples token ids below
+  it; the 32000 default would produce out-of-range ids for models with a smaller
+  vocabulary, so a profile that declares `model.vocabSize` drives `--vocab-size`.
+
 ## Platform notes (OpenShift)
 
 - Manager runs with `runAsNonRoot` but no fixed UID, because SCCs assign a range.

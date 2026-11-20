@@ -86,10 +86,14 @@ type SimulationEnvironmentSpec struct {
 
 // NodeSelection selects the nodes eligible for synthetic GPU advertisement.
 type NodeSelection struct {
-	// NodeSelector must match for a node to be eligible for simulation.
+	// NodeSelector must match for a node to be eligible for simulation. An empty
+	// selector follows Kubernetes semantics and selects every node, which puts
+	// synthetic capacity on control-plane nodes too; nodes carrying a real GPU
+	// provider are still excluded, because advertising there would conflict with
+	// it. Prefer an explicit selector for anything larger than a test cluster.
 	//
-	// +kubebuilder:validation:MinProperties=1
-	NodeSelector map[string]string `json:"nodeSelector"`
+	// +kubebuilder:validation:Optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 
 	// Tolerations are applied to the device-plugin DaemonSet so that eligible
 	// tainted nodes can run it.

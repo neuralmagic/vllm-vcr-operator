@@ -784,3 +784,46 @@ func TestReconcileRequeuesWhenStatusRetriesAreExhausted(t *testing.T) {
 		t.Errorf("status update attempts = %d, want the retry budget to be spent before requeueing", attempts)
 	}
 }
+
+// TestEmptyNodeSelectorSelectsEveryNode covers the relaxed API: an empty selector
+// follows Kubernetes semantics and matches all nodes, so the DaemonSet carries no
+// node selector. Synthetic capacity on control-plane nodes is then legitimate but
+// surprising, so the reconciler says so in an event.
+func TestEmptyNodeSelectorSelectsEveryNode(t *testing.T) {
+	env := testEnvironment()
+	env.Spec.NodeSelection.NodeSelector = nil
+	reg := newFakeRegistry()
+	reconciler, c, recorder := environmentReconciler(t, reg, env)
+
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: env.Name},
+	}); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+
+	daemonSet := &appsv1.DaemonSet{}
+	if err := c.Get(context.Background(), types.NamespacedName{
+		Namespace: testOperatorNamespace,
+		Name:      names.DevicePluginName,
+	}, daemonSet); err != nil {
+		t.Fatalf("get device plugin DaemonSet: %v", err)
+	}
+	if len(daemonSet.Spec.Template.Spec.NodeSelector) != 0 {
+		t.Errorf("DaemonSet node selector = %v, want none for an empty selection", daemonSet.Spec.Template.Spec.NodeSelector)
+	}
+
+	found := false
+	for {
+		select {
+		case event := <-recorder.Events:
+			if strings.Contains(event, "AllNodesSelected") {
+				found = true
+			}
+		default:
+			if !found {
+				t.Error("no AllNodesSelected warning was recorded for an empty node selector")
+			}
+			return
+		}
+	}
+}

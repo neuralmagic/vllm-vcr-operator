@@ -46,6 +46,10 @@ type SimulatorInput struct {
 	LogRequests bool
 	// EngineID is the Pod identity, when the caller supplies one.
 	EngineID string
+
+	// VocabSize is the model's tokenizer vocabulary, when the profile declares it.
+	// Random token ids must stay inside it or detokenization fails.
+	VocabSize int
 	// MaxLoras is the adapter diversity cap; zero omits the flag.
 	MaxLoras int
 	// PDRole is the P/D role; "" and "both" omit the flag.
@@ -107,6 +111,9 @@ func SimulatorCommand(in SimulatorInput) []string {
 		// A stable engine id keeps the ready-response instance id and the default
 		// KV-event topic tied to the Pod rather than to a process-local default.
 		args = append(args, "--engine-id", identity)
+	}
+	if in.VocabSize > 0 {
+		args = append(args, "--vocab-size", strconv.Itoa(in.VocabSize))
 	}
 	if in.MaxLoras > 0 {
 		args = append(args, "--max-loras", strconv.Itoa(in.MaxLoras))

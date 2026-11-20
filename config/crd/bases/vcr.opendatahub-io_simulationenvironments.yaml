@@ -322,9 +322,12 @@ spec:
                   nodeSelector:
                     additionalProperties:
                       type: string
-                    description: NodeSelector must match for a node to be eligible
-                      for simulation.
-                    minProperties: 1
+                    description: |-
+                      NodeSelector must match for a node to be eligible for simulation. An empty
+                      selector follows Kubernetes semantics and selects every node, which puts
+                      synthetic capacity on control-plane nodes too; nodes carrying a real GPU
+                      provider are still excluded, because advertising there would conflict with
+                      it. Prefer an explicit selector for anything larger than a test cluster.
                     type: object
                   tolerations:
                     description: |-
@@ -368,8 +371,6 @@ spec:
                           type: string
                       type: object
                     type: array
-                required:
-                - nodeSelector
                 type: object
             required:
             - devicesPerNode

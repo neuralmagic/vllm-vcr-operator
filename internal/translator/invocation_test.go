@@ -298,3 +298,25 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+// TestVocabSizeComesFromTheProfile covers a silent-wrongness case: the simulator
+// samples random ids in [0, vocab_size) and defaults to 32000. A model with a
+// smaller vocabulary produces out-of-range ids that fail detokenization, so a
+// profile that declares its vocabulary must drive the flag.
+func TestVocabSizeComesFromTheProfile(t *testing.T) {
+	t.Run("not declared", func(t *testing.T) {
+		admission, err := runTranslate(t, translateCase{name: "no vocabulary"}, testEnvironment())
+		mustAccept(t, admission, err)
+		rejectArgs(t, "backend", admission.Backend.Command, "--vocab-size")
+	})
+	t.Run("declared", func(t *testing.T) {
+		admission, err := runTranslate(t, translateCase{
+			name: "declared vocabulary",
+			mutate: func(m *profile.Metadata) {
+				m.Model.VocabSize = 151936
+			},
+		}, testEnvironment())
+		mustAccept(t, admission, err)
+		requireArgs(t, "backend", admission.Backend.Command, "--vocab-size", "151936")
+	})
+}

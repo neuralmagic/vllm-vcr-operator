@@ -128,6 +128,7 @@ func backendInvocation(cfg *vllm.Config, eff effective, env Environment, metadat
 		SchedulingPolicy:    eff.schedulingPolicy,
 		LogRequests:         eff.logRequests,
 		EngineID:            podIdentity,
+		VocabSize:           metadata.Model.VocabSize,
 		MaxLoras:            eff.maxLoras,
 		PDRole:              eff.pdRole,
 		KVEvents:            eff.kvEvents.enabled,

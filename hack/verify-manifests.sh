@@ -207,6 +207,15 @@ validating_path='/validate-vcr-opendatahub-io-v1alpha1-simulationenvironment'
 build_has "mutating webhook path $mutating_path" \
   "$MUTATING_SEL"' | select(.clientConfig.service.path == "'"$mutating_path"'")'
 
+# The Pod webhook is fail-closed, so its Deployment must not be a single replica:
+# one lost Pod would block Pod creation in every admitted namespace.
+build_has "manager runs two admission replicas" \
+  'select(.kind == "Deployment" and .metadata.name == "vllm-vcr-operator-controller-manager") | select(.spec.replicas >= 2)'
+
+# Voluntary disruptions must not take both replicas at once.
+build_has "manager has a PodDisruptionBudget keeping one replica" \
+  'select(.kind == "PodDisruptionBudget" and .metadata.name == "vllm-vcr-operator-controller-manager") | select(.spec.minAvailable == 1)'
+
 # The mutating webhook projects a pull Secret on non-dry-run requests, so its
 # declared side effects are NoneOnDryRun; dry-run requests must write nothing.
 build_has "mutating webhook is fail-closed, dry-run side-effect free, v1, Equivalent" \

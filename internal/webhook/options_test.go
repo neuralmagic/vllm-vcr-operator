@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	"k8s.io/client-go/tools/record"
@@ -172,5 +173,79 @@ func TestOptionsDefaultReaderAndClock(t *testing.T) {
 	}
 	if resp := mutator.Admit(t.Context(), admissionRequest(t, admissionv1.Create, testPod())); !resp.Allowed {
 		t.Errorf("admission without explicit Reader/Now failed: %s", messageOf(resp))
+	}
+}
+
+// TestAdmissionDecisionsAreEvented asserts the two outcomes a test author needs
+// to see from Kubernetes alone: an accepted translation announces the pinned
+// profile, and a refusal announces why. Events are queued off the admission path,
+// so the assertions wait for the forwarder rather than assuming synchronous
+// delivery.
+func TestAdmissionDecisionsAreEvented(t *testing.T) {
+	t.Run("accepted", func(t *testing.T) {
+		env := testEnvironment(t)
+		recorder := record.NewFakeRecorder(16)
+		mutator, err := webhook.NewPodMutator(webhook.Options{
+			Client:            testClient(t, env),
+			OperatorNamespace: operatorNamespace,
+			FrontendImage:     testFrontend,
+			BackendImage:      testBackend,
+			Recorder:          recorder,
+		})
+		if err != nil {
+			t.Fatalf("new PodMutator: %v", err)
+		}
+
+		resp := mutator.Admit(t.Context(), admissionRequest(t, admissionv1.Create, testPod()))
+		if !resp.Allowed {
+			t.Fatalf("GPU Pod denied: %s", messageOf(resp))
+		}
+		event := waitForEvent(t, recorder, "SimulationInjected")
+		if !strings.Contains(event, "mock-profile") && !strings.Contains(event, "profile ") {
+			t.Errorf("event %q does not name the selected profile", event)
+		}
+	})
+
+	t.Run("rejected", func(t *testing.T) {
+		env := testEnvironment(t)
+		recorder := record.NewFakeRecorder(16)
+		mutator, err := webhook.NewPodMutator(webhook.Options{
+			Client:            testClient(t, env),
+			OperatorNamespace: operatorNamespace,
+			FrontendImage:     testFrontend,
+			BackendImage:      testBackend,
+			Recorder:          recorder,
+		})
+		if err != nil {
+			t.Fatalf("new PodMutator: %v", err)
+		}
+
+		pod := testPod()
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "--pipeline-parallel-size=2")
+		resp := mutator.Admit(t.Context(), admissionRequest(t, admissionv1.Create, pod))
+		if resp.Allowed {
+			t.Fatal("Pod with pipeline parallelism admitted")
+		}
+		event := waitForEvent(t, recorder, "SimulationRejected")
+		if !strings.Contains(event, "pipeline") {
+			t.Errorf("event %q does not name the refused setting", event)
+		}
+	})
+}
+
+// waitForEvent blocks until an event with the given reason is recorded.
+func waitForEvent(t *testing.T, recorder *record.FakeRecorder, reason string) string {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case event := <-recorder.Events:
+			if strings.Contains(event, reason) {
+				return event
+			}
+		case <-deadline:
+			t.Fatalf("no %s event was recorded", reason)
+			return ""
+		}
 	}
 }

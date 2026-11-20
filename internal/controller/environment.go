@@ -240,6 +240,7 @@ func (r *SimulationEnvironmentReconciler) publishStatus(
 		}
 		// Event once, after the write the API server accepted.
 		r.recordConditionChanges(current, previous)
+		r.recordOpenNodeSelection(current)
 		return nil
 	})
 	if err != nil {
@@ -288,6 +289,18 @@ func (r *SimulationEnvironmentReconciler) recordConditionChanges(env *vcrv1alpha
 		return
 	}
 	r.Recorder.Event(env, corev1.EventTypeWarning, profiles.Reason, profiles.Message)
+}
+
+// recordOpenNodeSelection warns when an empty node selector makes every node
+// eligible. Kubernetes semantics say an empty selector matches everything, so the
+// device plugin will run on control-plane nodes too. That is allowed on purpose,
+// but it should be visible rather than inferred.
+func (r *SimulationEnvironmentReconciler) recordOpenNodeSelection(env *vcrv1alpha1.SimulationEnvironment) {
+	if r.Recorder == nil || len(env.Spec.NodeSelection.NodeSelector) > 0 {
+		return
+	}
+	r.Recorder.Event(env, corev1.EventTypeWarning, "AllNodesSelected",
+		"spec.simulationNodes.nodeSelector is empty, so every node is eligible for synthetic GPUs, including control-plane nodes; nodes with a real GPU provider are still excluded. Set a selector unless this cluster exists only for simulation.")
 }
 
 // setCondition applies one condition to status, preserving the transition time of

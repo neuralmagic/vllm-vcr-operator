@@ -1,0 +1,18 @@
+# A PodDisruptionBudget keeps one admission replica serving during voluntary
+# disruptions (node drains, cluster upgrades). The webhook is fail-closed for Pod
+# creation, so losing both replicas at once blocks every Pod create in the
+# namespaces it admits.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vllm-vcr-operator-controller-manager
+  namespace: vllm-vcr-operator-system
+  labels:
+    app.kubernetes.io/name: vllm-vcr-operator
+    app.kubernetes.io/component: manager
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm-vcr-operator
+      control-plane: controller-manager
