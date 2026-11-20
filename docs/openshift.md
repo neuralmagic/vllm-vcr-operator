@@ -54,3 +54,16 @@ Real vLLM/vllm-vcr images, recorded-token fidelity, timing calibration, llm-d
 routing and KV-event consumption. Those require the profile-production deliverable
 and a published CPU frontend image for the pinned vLLM release; see
 `docs/limitations.md`.
+
+## Verified after the operational changes (OCP 4.22, 3 workers)
+
+| Check | Observed |
+| --- | --- |
+| Admission HA | two manager replicas Running, one holds the leader lease, PDB `minAvailable: 1` |
+| Admission decision events | `SimulationInjected` on `namespace/llm-d-e2e`: profile id, digest, model, GPU count |
+| Vocabulary size from the profile | backend args carry `--vocab-size 151936` (Qwen3-0.6B), not the simulator default |
+| Pull-secret reconciliation | copy present while the Pod ran; after scaling to 0 it was deleted 160s later, logged by `projected-secrets` |
+| Serving | Pod `Ready=True`, `engine connected to frontend`, KV publisher bound `tcp://0.0.0.0:5556` with `kv@10.128.2.26:8000@Qwen/Qwen3-0.6B` |
+
+Startup TLS lines ("bad certificate") appear only before `caBundle` is published;
+in steady state both replicas log none and admission succeeds.
