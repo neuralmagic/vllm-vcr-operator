@@ -18,9 +18,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/deviceplugin"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/deviceplugin"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 const (

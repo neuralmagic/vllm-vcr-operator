@@ -10,9 +10,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/controller"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/projection"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/controller"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/projection"
 )
 
 // projectedCopy builds an operator-managed copy the way admission writes it.

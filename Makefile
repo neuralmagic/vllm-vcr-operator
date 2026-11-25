@@ -51,8 +51,8 @@ test:
 # default vLLM line (docs/upstream-vllm-vcr.md). It skips cleanly when the network
 # or the simulator checkout is unavailable, and exits non-zero on real drift.
 #
-# The checkout it reads defaults to $$VLLM_VCR_DIR, then /home/acardace/work/vllm-vcr;
-# set VLLM_VCR_DIR to point it elsewhere.
+# The simulator checkout is taken from $$VLLM_VCR_DIR, then a sibling
+# ../vllm-vcr checkout; the flag below passes it through explicitly.
 .PHONY: check-upstream
 check-upstream:
 	./hack/check-vllm-vcr-upstream.sh $(if $(VLLM_VCR_DIR),--vllm-vcr-dir $(VLLM_VCR_DIR))
@@ -89,8 +89,12 @@ cover:
 	$(GO) test -coverprofile=cover.out ./...
 	$(GO) tool cover -func=cover.out | tail -1
 
+.PHONY: verify-docs
+verify-docs:
+	./hack/verify-docs-links.sh
+
 .PHONY: verify
-verify: fmt vet test
+verify: fmt vet test verify-docs
 
 .PHONY: manifests
 manifests:

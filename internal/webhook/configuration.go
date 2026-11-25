@@ -12,10 +12,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/profile"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/translator"
+	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/profile"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/translator"
 )
 
 // admissionDenial is one reason admission refuses a request;

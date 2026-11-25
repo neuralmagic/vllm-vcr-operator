@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/profile"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/translator"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/profile"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/translator"
 )
 
 // Defaults for the spike run. They are the layout contract's ports and the

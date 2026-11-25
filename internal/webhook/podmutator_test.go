@@ -11,9 +11,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
+	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
 )
 
 // TestPodWithoutGPURequestIsUntouched asserts admission leaves workloads that do

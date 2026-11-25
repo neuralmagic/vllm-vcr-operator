@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/translator"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/translator"
 )
 
 // TestPolicyTableIsCompleteAndWellFormed asserts the settings policy is data with a

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 // pinFile is the machine-readable record of the pinned vllm-vcr build

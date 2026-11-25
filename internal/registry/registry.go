@@ -15,7 +15,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 // imageProfileDir is the profile directory inside a profile image, as defined

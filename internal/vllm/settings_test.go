@@ -6,7 +6,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/vllm"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/vllm"
 )
 
 // vLLM 0.33.0 accepts human-readable sizes for --max-model-len: decimal

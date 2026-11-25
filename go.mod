@@ -1,4 +1,4 @@
-module github.com/opendatahub-io/vllm-vcr-operator
+module github.com/neuralmagic/vllm-vcr-operator
 
 go 1.26.5
 

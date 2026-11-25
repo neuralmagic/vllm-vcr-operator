@@ -14,15 +14,15 @@ Read before touching code.
 4. `internal/names/names.go` — shared identifiers. Do not duplicate literals.
 
 Prior art for `vllm-vcr play`, trace formats, and llm-d fixture deployments lives
-in `/home/acardace/work/vllm-vcr`:
-`docs/control-api.md`, `docs/trace-replay/`, `deploy/llm-d-prefix-cache/`,
-`deploy/trace-capture/base/offline-replay.yaml`, and `src/lib.rs` (`Opt`, the
-`play` flags).
+in a checkout of [vllm-vcr](https://github.com/neuralmagic/vllm-vcr) — set
+`VLLM_VCR_DIR` to it: `docs/control-api.md`, `docs/trace-replay/`,
+`deploy/llm-d-prefix-cache/`, `deploy/trace-capture/base/offline-replay.yaml`, and
+`src/lib.rs` (`Opt`, the `play` flags).
 
 ## Conventions
 
-- Go 1.26, module `github.com/opendatahub-io/vllm-vcr-operator`.
-- Tests are written first (see `/home/acardace/.agents/skills/tdd/SKILL.md`).
+- Go 1.26, module `github.com/neuralmagic/vllm-vcr-operator`.
+- Tests are written first: red, green, refactor, at an exported seam.
   Test behavior through exported interfaces; no assertions on private fields.
 - Packages stay pure where possible. Kubernetes client access is confined to
   `internal/controller` and `internal/webhook`; `internal/profile`,

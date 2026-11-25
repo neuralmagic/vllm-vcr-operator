@@ -8,8 +8,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/credentials"
+	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/credentials"
 )
 
 // registryCredentials maps a normalized registry host to a pull credential read

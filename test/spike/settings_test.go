@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/profile"
-	"github.com/opendatahub-io/vllm-vcr-operator/test/spike"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/profile"
+	"github.com/neuralmagic/vllm-vcr-operator/test/spike"
 )
 
 // fixtureMetadata is a recorded profile shaped like the example in

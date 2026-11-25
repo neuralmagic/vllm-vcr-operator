@@ -22,8 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/credentials"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/credentials"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 // Annotations recorded on a projected copy. They make the copy reconcilable: the

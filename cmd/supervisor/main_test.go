@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/supervisor"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/supervisor"
 )
 
 // getenvFrom returns a getenv func backed by a map, so tests never depend on the

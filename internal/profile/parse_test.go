@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/profile"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/profile"
 )
 
 // contractDocument mirrors the example metadata document in

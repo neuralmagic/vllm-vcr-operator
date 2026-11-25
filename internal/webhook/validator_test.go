@@ -8,9 +8,9 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/webhook"
+	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/webhook"
 )
 
 const otherProfileImage = "quay.io/opendatahub/vllm-vcr-profiles:h100-8b-tp2-bf16"

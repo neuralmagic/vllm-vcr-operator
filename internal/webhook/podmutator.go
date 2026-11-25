@@ -19,12 +19,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/rejection"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/runtime"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/translator"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/vllm"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/rejection"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/runtime"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/translator"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/vllm"
 )
 
 // PodMutator translates GPU-requesting vLLM workloads into the simulated runtime

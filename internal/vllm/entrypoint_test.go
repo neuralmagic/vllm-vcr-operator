@@ -3,7 +3,7 @@ package vllm_test
 import (
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/vllm"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/vllm"
 )
 
 // The supported invocation forms are the ones the workloads in the reference

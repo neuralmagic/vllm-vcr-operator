@@ -1,0 +1,25 @@
+name: Feature or capability request
+description: Extend what the operator translates or simulates.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: capability
+    attributes:
+      label: What capability
+      description: The vLLM setting, workload shape, or platform feature involved.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What test needs it
+      description: Which llm-d or repository test cannot run without it.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: How it could be verified
+      description: |
+        The operator rejects what it cannot verify. What would an executable check
+        look like (profile capability, cluster assertion, reference behavior)?

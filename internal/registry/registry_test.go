@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/registry"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/registry"
 )
 
 func TestResolveUsesConfigLabel(t *testing.T) {
@@ -249,7 +249,7 @@ func TestPackageHasNoClusterDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read package dir: %v", err)
 	}
-	forbidden := []string{"k8s.io/", "sigs.k8s.io/", "github.com/opendatahub-io/vllm-vcr-operator/internal/controller", "github.com/opendatahub-io/vllm-vcr-operator/internal/webhook"}
+	forbidden := []string{"k8s.io/", "sigs.k8s.io/", "github.com/neuralmagic/vllm-vcr-operator/internal/controller", "github.com/neuralmagic/vllm-vcr-operator/internal/webhook"}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {

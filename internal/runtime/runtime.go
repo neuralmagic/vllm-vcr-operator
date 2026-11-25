@@ -23,9 +23,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/supervisor"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/supervisor"
 )
 
 // tmpVolumeName and tmpMountPath give the simulator a writable scratch directory

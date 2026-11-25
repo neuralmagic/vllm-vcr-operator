@@ -1,0 +1,95 @@
+# Release: builds the operator binaries and the three operator container images.
+#
+# Not built here: profile images (a separate repository) and the runtime images
+# (the CPU vLLM frontend is derived from the official vLLM CPU image, and the
+# simulator is a published vllm-vcr release). The workflow publishes only what
+# this repository owns.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish (must already exist)
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  GO_VERSION: "1.26"
+  REGISTRY: ghcr.io
+
+jobs:
+  binaries:
+    name: build and publish binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: build
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          mkdir -p dist
+          for pair in linux/amd64 linux/arm64; do
+            os="${pair%/*}"; arch="${pair#*/}"
+            for cmd in manager deviceplugin supervisor profileexport; do
+              out="dist/${cmd}_${tag}_${os}_${arch}"
+              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+                go build -trimpath -ldflags="-s -w -X main.version=${tag}" -o "$out" "./cmd/${cmd}"
+            done
+          done
+          cd dist && sha256sum ./* > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+  images:
+    name: build and publish images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: manager
+            dockerfile: Dockerfile
+            image: vllm-vcr-operator
+          - name: device-plugin
+            dockerfile: Dockerfile.device-plugin
+            image: vllm-vcr-device-plugin
+          - name: supervisor
+            dockerfile: Dockerfile.supervisor
+            image: vllm-vcr-supervisor
+            target: supervisor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
+          tags: |
+            type=ref,event=tag
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

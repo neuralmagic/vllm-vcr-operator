@@ -10,7 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/projection"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/projection"
 )
 
 // ProjectedSecretReconciler keeps the operator-managed pull-secret copies in

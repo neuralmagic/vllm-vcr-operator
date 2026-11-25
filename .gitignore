@@ -7,3 +7,8 @@ coverage.html
 .pi/
 .unipi/
 vllm-vcr-operator-spec.md
+
+# Local cluster credentials and scratch state must never be committed.
+*.kubeconfig
+kubeconfig
+.env

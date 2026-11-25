@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/vllm"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/vllm"
 )
 
 // Combination checks.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/vllm"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/vllm"
 )
 
 // Rejection is the default outcome for configuration the resolver cannot

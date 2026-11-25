@@ -10,8 +10,8 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	"k8s.io/client-go/tools/record"
 
-	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/webhook"
+	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/webhook"
 )
 
 // TestWebhookPathsMatchTheInstalledManifests asserts the paths this package

@@ -110,8 +110,8 @@ provider), on the machine the suite was developed on:
 
 ```
 $ hack/kind-up.sh && hack/images.sh --build --stub --load && make test-cluster
-ok  	github.com/opendatahub-io/vllm-vcr-operator/test/cluster	151.829s
-ok  	github.com/opendatahub-io/vllm-vcr-operator/test/cluster/certs	0.221s
+ok  	github.com/neuralmagic/vllm-vcr-operator/test/cluster	151.829s
+ok  	github.com/neuralmagic/vllm-vcr-operator/test/cluster/certs	0.221s
 ```
 
 The run exercises the real path with no workaround: the shipped `config/default`

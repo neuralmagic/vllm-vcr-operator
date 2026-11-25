@@ -6,7 +6,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
 )
 
 // rewritePlacement replaces accelerator-specific placement with eligibility for

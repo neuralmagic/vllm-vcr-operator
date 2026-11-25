@@ -3,7 +3,7 @@ package vllm_test
 import (
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/vllm"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/vllm"
 )
 
 // boolSettingSpellings is one modelled vLLM 0.33.0 boolean setting together with

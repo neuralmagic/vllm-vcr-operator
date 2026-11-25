@@ -1,6 +1,6 @@
 package translator
 
-import "github.com/opendatahub-io/vllm-vcr-operator/internal/rejection"
+import "github.com/neuralmagic/vllm-vcr-operator/internal/rejection"
 
 // Rejection is the shared structured rejection (internal/rejection). The resolver
 // and the settings policy produce the same type so that admission has one error

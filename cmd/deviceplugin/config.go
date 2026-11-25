@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/deviceplugin"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/deviceplugin"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 const (

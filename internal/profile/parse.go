@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 // TraceFormatJSONL is the only trace format this operator release consumes. A

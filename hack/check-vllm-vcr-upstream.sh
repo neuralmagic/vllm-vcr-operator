@@ -25,8 +25,8 @@
 #   --ref REF           upstream ref to compare (default: main)
 #   --no-fetch          never contact the remote; compare against local refs
 #   --remote URL        simulator remote (default: the HTTPS GitHub URL)
-#   --vllm-vcr-dir DIR  simulator checkout (default: $VLLM_VCR_DIR or
-#                       /home/acardace/work/vllm-vcr)
+#   --vllm-vcr-dir DIR  simulator checkout (default: $VLLM_VCR_DIR, then a
+#                       sibling ../vllm-vcr checkout)
 #   --opt-file FILE     simulator `Opt` source (default: <dir>/src/lib.rs)
 #   --compat-file FILE  simulator compat.toml (default: <dir>/compat.toml)
 #   --flags-file FILE   emitted play flags (default: hack/vllm-vcr-play-flags.txt)
@@ -42,7 +42,10 @@ repo_root=$(cd -- "$script_dir/.." && pwd)
 ref=main
 fetch=1
 remote=https://github.com/neuralmagic/vllm-vcr.git
-vllm_dir=${VLLM_VCR_DIR:-/home/acardace/work/vllm-vcr}
+vllm_dir=${VLLM_VCR_DIR:-}
+if [[ -z "$vllm_dir" && -d "$repo_root/../vllm-vcr" ]]; then
+  vllm_dir="$repo_root/../vllm-vcr"
+fi
 opt_file=""
 compat_file=""
 flags_file=""

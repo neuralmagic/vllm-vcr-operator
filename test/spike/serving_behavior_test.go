@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/test/spike"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/test/spike"
 )
 
 // completionResponse is the part of the completions response the spike asserts.

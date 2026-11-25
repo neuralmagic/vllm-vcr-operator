@@ -7,10 +7,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/profile"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/translator"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/profile"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/translator"
 )
 
 // TestSettingsPolicyFamilies drives one accepted and one rejected workload per

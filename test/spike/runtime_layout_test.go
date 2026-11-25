@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/test/spike"
+	"github.com/neuralmagic/vllm-vcr-operator/test/spike"
 )
 
 // TestRuntimeLayout is the runtime-layout and lifecycle spike the specification

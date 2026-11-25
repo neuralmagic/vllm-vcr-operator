@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/supervisor"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/supervisor"
 )
 
 // healthEndpoint is a controllable HTTP endpoint standing in for the frontend's

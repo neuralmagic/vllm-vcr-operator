@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/test/spike"
+	"github.com/neuralmagic/vllm-vcr-operator/test/spike"
 )
 
 // env builds a getenv function from a literal map, so a case states exactly the

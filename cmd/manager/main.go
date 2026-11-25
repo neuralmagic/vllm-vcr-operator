@@ -15,9 +15,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	vcrv1alpha1 "github.com/opendatahub-io/vllm-vcr-operator/api/v1alpha1"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/controller"
-	operatorwebhook "github.com/opendatahub-io/vllm-vcr-operator/internal/webhook"
+	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/controller"
+	operatorwebhook "github.com/neuralmagic/vllm-vcr-operator/internal/webhook"
 )
 
 var (

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/test/spike"
+	"github.com/neuralmagic/vllm-vcr-operator/test/spike"
 )
 
 // testEnvironment is the environment an evidence document records.

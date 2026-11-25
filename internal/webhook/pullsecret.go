@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/credentials"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/credentials"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/projection"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/projection"
 )
 
 const (

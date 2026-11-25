@@ -48,6 +48,28 @@ jobs:
         # (needs real images).
         run: make test-unit
 
+  generated:
+    name: generated files are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: install controller-gen
+        run: go install sigs.k8s.io/controller-tools/cmd/controller-gen@${CONTROLLER_GEN_VERSION}
+      - name: regenerate
+        run: |
+          controller-gen object:headerFile="" paths="./..."
+          controller-gen crd paths="./..." output:crd:dir=config/crd/bases
+      - name: fail on drift
+        run: |
+          if ! git diff --exit-code; then
+            echo "generated files are stale: run 'make manifests generate' and commit the result" >&2
+            exit 1
+          fi
+
   test-e2e:
     name: envtest acceptance suite
     runs-on: ubuntu-latest
@@ -91,6 +113,8 @@ jobs:
           sudo chmod +x /usr/local/bin/yq
       - name: verify manifests
         run: hack/verify-manifests.sh
+      - name: documentation links
+        run: hack/verify-docs-links.sh
       - name: verify the CRD is regenerated
         # A stale config/crd/bases means the API changed without `make manifests`.
         # Only the CRD is compared: config/rbac/role.yaml is regenerated from RBAC

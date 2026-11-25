@@ -11,9 +11,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/controller"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/deviceplugin"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/controller"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/deviceplugin"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 const testDevicePluginImage = "registry.example.test/vllm-vcr-device-plugin:test"

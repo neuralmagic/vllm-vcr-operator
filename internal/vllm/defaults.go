@@ -1,7 +1,7 @@
 package vllm
 
 import (
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 // Defaults of vLLM 0.33.0 encoded by this package.

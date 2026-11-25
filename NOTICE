@@ -1,0 +1,12 @@
+vllm-vcr-operator
+Copyright 2026 Red Hat, Inc.
+
+This product includes software developed as part of the llm-d project
+(https://llm-d.ai) and uses the following projects at runtime:
+
+  - vLLM (https://github.com/vllm-project/vllm), Apache License 2.0
+  - vllm-vcr (https://github.com/neuralmagic/vllm-vcr), Apache License 2.0 / MIT
+  - Kubernetes, controller-runtime (https://github.com/kubernetes-sigs/controller-runtime), Apache License 2.0
+
+Container images referenced by the default manifests are not distributed with
+this repository.

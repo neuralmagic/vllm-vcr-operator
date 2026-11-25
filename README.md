@@ -7,7 +7,7 @@ GPU-targeted workload manifest.
 The operator watches for Pods that request `nvidia.com/gpu`. For those Pods it
 keeps the GPU request (so scheduling and capacity-exhaustion tests still work),
 replaces the real vLLM engine with a CPU-hosted Python vLLM frontend connected to
-[`vllm-vcr play`](https://github.com/nealimgic/vllm-vcr), and injects a
+[`vllm-vcr play`](https://github.com/neuralmagic/vllm-vcr), and injects a
 profile-provisioning init container that exports recorded model timing and content
 from an OCI image. llm-d components stay real: only the engine is simulated.
 
@@ -27,11 +27,12 @@ from an OCI image. llm-d components stay real: only the engine is simulated.
 
 ## Status
 
-Early. What exists is the operator, its translation and runtime logic, the
-synthetic device plugin, the profile reconciliation and provisioning path, the
-manifests, and the spike harnesses. Read
-[`docs/limitations.md`](docs/limitations.md) before relying on any behavior: it
-lists what is verified, what is rejected, and what cannot be claimed yet.
+The operator is complete against its specification and has been run end to end on
+a GPU-free OpenShift cluster with real images: the official CPU vLLM 0.33.0
+frontend, the published `vllm-vcr` 0.2.5 simulator, a profile image, and llm-d's
+own router. What remains unproven is fidelity, not plumbing — read
+[`docs/limitations.md`](docs/limitations.md) before relying on any timing or
+content claim.
 
 Status of specific guarantees:
 
@@ -42,12 +43,11 @@ Status of specific guarantees:
 | Every supported or rejected vLLM setting has a reviewable policy row | [`docs/settings-policy.md`](docs/settings-policy.md) | `go test ./internal/translator/...` |
 | A profile either explains the workload or the workload is rejected | [`docs/contracts/profile-image.md`](docs/contracts/profile-image.md) | `go test ./internal/profile/...` |
 | A GPU-free cluster can schedule and serve the workload | `test/cluster` | `make test-cluster` (kind or any cluster, no GPU) |
+| The real runtime serves through the real frontend | [`docs/spikes/real-stack-validation.md`](docs/spikes/real-stack-validation.md) | Pod Ready with zero restarts, `/v1/models`, chat completions, streaming, 389 `vllm:*` series |
+| llm-d routes by prefix locality against simulated model servers | [`docs/spikes/llm-d-router-integration.md`](docs/spikes/llm-d-router-integration.md) | llm-d-router's EPP discovered both Pods, subscribed to their KV publishers, and routed new vs repeated prefixes correctly |
 
-Nothing in this repository has been executed against real vLLM/vllm-vcr images in
-this checkout, so no serving-fidelity claim is made. The command that produces
-that evidence is named next to every claim. `make test-e2e` and
-`make test-cluster` are the targets of `test/e2e` and `test/cluster`; a checkout
-without those suites has no such target.
+No serving-fidelity claim is made: the trace used in those runs is a mock. The
+command that produces each piece of evidence is named next to the claim.
 
 ## Quick start
 
@@ -86,13 +86,27 @@ kubectl -n vllm-vcr-simulated rollout status deploy/mock-prefix-cache
 examples/completions.sh vllm-vcr-simulated deploy/mock-prefix-cache
 ```
 
+OpenShift has its own path, including the SCC binding, SELinux requirement, and
+certificates without cert-manager:
+
+```bash
+hack/openshift-install.sh --yes --admission-namespaces <ns>
+```
+
 Install details, required Secrets, image overrides, and RBAC are in
-[`config/README.md`](config/README.md) and [`docs/operations.md`](docs/operations.md).
+[`config/README.md`](config/README.md) and [`docs/operations.md`](docs/operations.md);
+the platform-specific parts are in [`docs/openshift.md`](docs/openshift.md). Image
+references in `config/manager` are illustrative placeholders: point them at the
+images you built or the release images from this repository's release workflow.
 
 ## Documentation
 
 | Document | Contents |
 | --- | --- |
+| [`docs/architecture.md`](docs/architecture.md) | How the pieces fit: admission path, decisions, lifecycle, KV events, platform notes |
+| [`docs/openshift.md`](docs/openshift.md) | OpenShift install, SCC/SELinux requirements, what was verified there |
+| [`docs/spikes/real-stack-validation.md`](docs/spikes/real-stack-validation.md) | Real frontend + simulator evidence, metrics inventory, defects it exposed |
+| [`docs/spikes/llm-d-router-integration.md`](docs/spikes/llm-d-router-integration.md) | llm-d-router integration and prefix-locality measurements |
 | [`docs/operations.md`](docs/operations.md) | Install, configuration, node preparation, device plugin behavior, capacity exhaustion, diagnostics, cleanup |
 | [`docs/capability-matrix.md`](docs/capability-matrix.md) | Supported, unverified, and rejected serving capabilities |
 | [`docs/settings-policy.md`](docs/settings-policy.md) | Every vLLM 0.33.0 setting the operator accepts, translates, or rejects, with rationale and rejection examples |
@@ -163,3 +177,10 @@ make manifests generate
 ```
 
 `hack/verify-manifests.sh` is the cluster-free manifest check (also run in CI).
+`make check-upstream` reports drift against the pinned `vllm-vcr` release, and
+`hack/bump-vllm.sh` moves the operator to another vLLM release.
+
+Contributions: [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md),
+and [`SECURITY.md`](SECURITY.md) for vulnerability reports.
+
+Licensed under the Apache License 2.0; see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/translator"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/translator"
 )
 
 // playFlagsPath is the checked-in list of `vllm-vcr play` flags this translator

@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 const runTestTimeout = 5 * time.Second

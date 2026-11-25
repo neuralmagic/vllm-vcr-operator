@@ -37,7 +37,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/supervisor"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/supervisor"
 )
 
 // exitUsage is the exit code for an unusable invocation, matching the

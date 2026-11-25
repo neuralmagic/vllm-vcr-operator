@@ -3,8 +3,8 @@ package translator
 import (
 	"strings"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/plan"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
 )
 
 // Accelerator placement data. These tables describe what a GPU-targeted Pod asks

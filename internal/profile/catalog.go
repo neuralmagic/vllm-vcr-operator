@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 // Candidate is one reconciled profile entry as published in

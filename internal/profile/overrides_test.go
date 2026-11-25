@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/profile"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/profile"
 )
 
 func int64Ptr(v int64) *int64       { return &v }

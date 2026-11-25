@@ -1,7 +1,7 @@
 package vllm
 
 import (
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/rejection"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/rejection"
 )
 
 // RedactedValue replaces any value that must not appear in errors, logs, or

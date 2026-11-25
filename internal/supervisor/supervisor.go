@@ -47,7 +47,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/names"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 )
 
 // Defaults applied by New when a Config field is left zero.

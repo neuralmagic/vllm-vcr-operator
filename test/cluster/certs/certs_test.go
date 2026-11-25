@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/test/cluster/certs"
+	"github.com/neuralmagic/vllm-vcr-operator/test/cluster/certs"
 )
 
 // TestGenerateServerCertificateChainsToCA asserts the property the suite relies

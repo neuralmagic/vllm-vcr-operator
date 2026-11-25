@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/internal/credentials"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/credentials"
 )
 
 func secret(data map[string][]byte) *corev1.Secret {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opendatahub-io/vllm-vcr-operator/test/spike"
+	"github.com/neuralmagic/vllm-vcr-operator/test/spike"
 )
 
 // TestRunArgsKeepTheProcessArgumentTail asserts the container invocation is

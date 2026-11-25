@@ -1,0 +1,39 @@
+name: Bug report
+description: Something the operator does that contradicts the contracts or docs.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste Secret values, kubeconfigs, or registry credentials.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Tag or commit.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The observed behavior, including the admission message or event if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: Quote the contract or doc line that promises it, if you can.
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: SimulationEnvironment spec, workload manifest (redacted), commands.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed credentials, tokens, and kubeconfig material from this report.
+          required: true
