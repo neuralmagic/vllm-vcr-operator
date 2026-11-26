@@ -16,12 +16,12 @@ import (
 const otherProfileImage = "quay.io/opendatahub/vllm-vcr-profiles:h100-8b-tp2-bf16"
 
 // updateRequest renders an UPDATE AdmissionRequest carrying both versions.
-func updateRequest(t *testing.T, previous, next *vcrv1alpha1.SimulationEnvironment) *admissionv1.AdmissionRequest {
+func updateRequest(t *testing.T, previous, next *vcrv1alpha1.VcrGpuCluster) *admissionv1.AdmissionRequest {
 	t.Helper()
-	raw := func(object *vcrv1alpha1.SimulationEnvironment) runtime.RawExtension {
+	raw := func(object *vcrv1alpha1.VcrGpuCluster) runtime.RawExtension {
 		encoded, err := json.Marshal(object)
 		if err != nil {
-			t.Fatalf("marshal SimulationEnvironment: %v", err)
+			t.Fatalf("marshal VcrGpuCluster: %v", err)
 		}
 		return runtime.RawExtension{Raw: encoded}
 	}
@@ -40,7 +40,7 @@ func TestValidatorAcceptsTheSingletonName(t *testing.T) {
 	resp := validator.Validate(t.Context(), admissionRequest(t, admissionv1.Create, testEnvironment(t)))
 
 	if !resp.Allowed {
-		t.Fatalf("SimulationEnvironment named default denied: %s", messageOf(resp))
+		t.Fatalf("VcrGpuCluster named default denied: %s", messageOf(resp))
 	}
 }
 
@@ -54,9 +54,9 @@ func TestValidatorRejectsAnotherName(t *testing.T) {
 	resp := validator.Validate(t.Context(), admissionRequest(t, admissionv1.Create, other))
 
 	if resp.Allowed {
-		t.Fatal("SimulationEnvironment with another name admitted")
+		t.Fatal("VcrGpuCluster with another name admitted")
 	}
-	if message := messageOf(resp); !strings.Contains(message, vcrv1alpha1.SimulationEnvironmentNameDefault) {
+	if message := messageOf(resp); !strings.Contains(message, vcrv1alpha1.VcrGpuClusterNameDefault) {
 		t.Errorf("denial message %q does not name the only accepted name", message)
 	}
 }
@@ -76,7 +76,7 @@ func TestValidatorAllowsDeletion(t *testing.T) {
 // advertised capacity requires the documented annotation.
 func TestValidatorRejectsCapacityReductionWithoutAcknowledgement(t *testing.T) {
 	previous := testEnvironment(t)
-	next := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	next := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.DevicesPerNode = 4
 	})
 	validator := webhook.NewEnvironmentValidator()
@@ -98,7 +98,7 @@ func TestValidatorRejectsCapacityReductionWithoutAcknowledgement(t *testing.T) {
 // explicit opt-in.
 func TestValidatorAllowsAcknowledgedCapacityReduction(t *testing.T) {
 	previous := testEnvironment(t)
-	next := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	next := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.DevicesPerNode = 4
 		e.Annotations = map[string]string{webhook.AllowCapacityReductionAnnotation: "true"}
 	})
@@ -115,7 +115,7 @@ func TestValidatorAllowsAcknowledgedCapacityReduction(t *testing.T) {
 // acknowledgement.
 func TestValidatorAllowsCapacityIncrease(t *testing.T) {
 	previous := testEnvironment(t)
-	next := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	next := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.DevicesPerNode = 16
 	})
 	validator := webhook.NewEnvironmentValidator()
@@ -184,7 +184,7 @@ func TestValidatorAllowsProfileRemovalAlone(t *testing.T) {
 // identity is a supported update.
 func TestValidatorAllowsProfileImageChange(t *testing.T) {
 	previous := testEnvironment(t)
-	next := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	next := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.Profiles = []vcrv1alpha1.ProfileSource{{Image: otherProfileImage}}
 	})
 	validator := webhook.NewEnvironmentValidator()
@@ -200,7 +200,7 @@ func TestValidatorAllowsProfileImageChange(t *testing.T) {
 // accelerator without touching the catalog is allowed.
 func TestValidatorAllowsGPUTypeChangeAlone(t *testing.T) {
 	previous := testEnvironment(t)
-	next := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	next := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.GPUType = "H100"
 	})
 	validator := webhook.NewEnvironmentValidator()
@@ -239,9 +239,9 @@ func TestValidatorAnnotationsAreDocumented(t *testing.T) {
 }
 
 // environmentWithProfiles builds an environment listing the given profile images.
-func environmentWithProfiles(t *testing.T, images ...string) *vcrv1alpha1.SimulationEnvironment {
+func environmentWithProfiles(t *testing.T, images ...string) *vcrv1alpha1.VcrGpuCluster {
 	t.Helper()
-	return testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	return testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.Profiles = make([]vcrv1alpha1.ProfileSource, len(images))
 		for i, image := range images {
 			e.Spec.Profiles[i] = vcrv1alpha1.ProfileSource{Image: image}

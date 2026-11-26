@@ -9,7 +9,7 @@ fixtures rather than examples.
 | `llmd/mock-prefix-cache-kv-events-deployment.yaml` | The same workload plus `--kv-events-config`, for prefix-cache routing. | The llm-d integration path (`make test-cluster`) |
 | `llmd/namespace.yaml`, `llmd/serviceaccount.yaml` | The workload namespace and ServiceAccount the fixtures name. | `kubectl apply -k test/fixtures/llmd` |
 | `llmd/kustomization.yaml` | Namespace, ServiceAccount, and the base fixture. Apply the kv-events variant *instead of* the base. | — |
-| `environments/h200.yaml` | The singleton `SimulationEnvironment` with a digest-pinned placeholder profile image. | `make test-e2e`, `make test-cluster` |
+| `environments/h200.yaml` | The singleton `VcrGpuCluster` with a digest-pinned placeholder profile image. | `make test-e2e`, `make test-cluster` |
 | `router/precise-prefix-cache-routing.values.yaml` | Reference values for llm-d's precise-prefix-cache-routing guide. | Human reference for the integration path |
 | `profiles/qwen3-0.6b-h200-tp1-bf16/` | A **placeholder** profile image filesystem: metadata and a trace file, claiming no capability. | `test/fixtures` (contract checks only) |
 
@@ -58,7 +58,7 @@ it exercises, so a reader can reproduce them by hand.
    device plugin.
 2. **Apply the environment.** The reconciler resolves each profile image's
    metadata label into `status.profiles` and renders the device-plugin DaemonSet.
-   `kubectl get sime default -o jsonpath='{.status.conditions}'` shows
+   `kubectl get vgc default -o jsonpath='{.status.conditions}'` shows
    `EnvironmentReady`; `kubectl -n vllm-vcr-operator-system get ds` shows
    `vllm-vcr-device-plugin` ready on every selected node.
 3. **Apply the modelserver fixture.** The webhook translates the Pods: the GPU
@@ -103,7 +103,7 @@ What this path can **not** claim yet:
 | Check | Why |
 | --- | --- |
 | Every manifest parses as YAML; manifest files carry `apiVersion` and `kind` | A fixture that does not parse is not evidence |
-| The environment decodes into `v1alpha1.SimulationEnvironment`, is named `default`, has a digest-pinned profile, and its runtime sizing does not request `nvidia.com/gpu` | Only the workload's container may hold the synthetic allocation |
+| The environment decodes into `v1alpha1.VcrGpuCluster`, is named `default`, has a digest-pinned profile, and its runtime sizing does not request `nvidia.com/gpu` | Only the workload's container may hold the synthetic allocation |
 | The modelserver fixtures request `nvidia.com/gpu`, keep llm-d labels/ports/probes, and carry no `vcr.opendatahub-io/*` label or annotation | Admission must trigger on the GPU request alone |
 | The placeholder profile parses under `internal/profile` and claims no recorded tokens, no latency model, no KV events, no capability | A fixture that claimed a capability would authorize serving features no recording supports |
 | `vcr-profile-export` accepts the placeholder profile and writes both documents | The provisioning contract is checked without images |

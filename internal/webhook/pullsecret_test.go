@@ -39,9 +39,9 @@ func dockerConfigSecret(name string, auths map[string]map[string]string) *corev1
 
 // environmentWithPullSecret points the environment at one operator-namespace pull
 // Secret.
-func environmentWithPullSecret(t *testing.T, secretName string) *vcrv1alpha1.SimulationEnvironment {
+func environmentWithPullSecret(t *testing.T, secretName string) *vcrv1alpha1.VcrGpuCluster {
 	t.Helper()
-	return testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	return testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{{Name: secretName}}
 	})
 }
@@ -133,7 +133,7 @@ func TestPrivateProfileSecretIsProjected(t *testing.T) {
 // TestProfilePullSecretOverridesEnvironmentSecrets asserts only the Secret the
 // selected profile names is projected when it overrides the environment-wide list.
 func TestProfilePullSecretOverridesEnvironmentSecrets(t *testing.T) {
-	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	env := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{{Name: workloadPullSecret}}
 		e.Spec.Profiles[0].PullSecretName = profilePullSecret
 	})
@@ -317,7 +317,7 @@ func TestNoPullSecretsConfiguredProjectsNothing(t *testing.T) {
 // message.
 func TestConflictingPullSecretsDenied(t *testing.T) {
 	const secondSecret = "second-registry"
-	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	env := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{
 			{Name: workloadPullSecret}, {Name: secondSecret},
 		}
@@ -441,12 +441,12 @@ func TestCredentialRotationUpdatesTheSameCopy(t *testing.T) {
 // different order produces one copy, not two.
 func TestProjectedNameIgnoresSourceOrder(t *testing.T) {
 	const secondSecret = "second-registry"
-	first := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	first := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{
 			{Name: workloadPullSecret}, {Name: secondSecret},
 		}
 	})
-	second := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	second := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{
 			{Name: secondSecret}, {Name: workloadPullSecret},
 		}
@@ -463,7 +463,7 @@ func TestProjectedNameIgnoresSourceOrder(t *testing.T) {
 	}
 	pod := testPod()
 
-	admit := func(env *vcrv1alpha1.SimulationEnvironment) string {
+	admit := func(env *vcrv1alpha1.VcrGpuCluster) string {
 		objects := append([]client.Object{env}, sources()...)
 		c := testClient(t, objects...)
 		resp := testMutator(t, c).Admit(t.Context(), admissionRequest(t, admissionv1.Create, pod))
@@ -534,7 +534,7 @@ func TestForeignSecretWithTheProjectedNameIsNotOverwritten(t *testing.T) {
 func TestUnrelatedRegistrySecretIsNotProjected(t *testing.T) {
 	const unrelated = "unrelated-registry"
 	const unrelatedPassword = "unrelated-s3cret-value"
-	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	env := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{
 			{Name: workloadPullSecret}, {Name: unrelated},
 		}
@@ -601,7 +601,7 @@ func TestOnlyMatchingRegistryEntriesAreProjected(t *testing.T) {
 // authenticate the profile image's registry, admission lets the pull proceed
 // anonymously instead of copying unrelated credentials.
 func TestNoMatchingRegistryProjectsNothing(t *testing.T) {
-	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	env := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{{Name: workloadPullSecret}}
 	})
 	c := testClient(t, env, dockerConfigSecret(workloadPullSecret, map[string]map[string]string{
@@ -637,7 +637,7 @@ func TestProjectedNameFollowsTheProjectedCredentials(t *testing.T) {
 	const secondSecret = "second-registry"
 	const secondImage = "ghcr.io/example/profiles:qwen3-0.6b-h200-tp1-bf16"
 
-	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	env := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{
 			{Name: workloadPullSecret}, {Name: secondSecret},
 		}

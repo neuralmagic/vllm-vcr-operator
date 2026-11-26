@@ -67,7 +67,7 @@ No annotation, status field, log line, or event may contain a Secret value.
 ## Admission side effects
 
 Admission is a translation, not a provisioning step. It reads the reconciled
-profile catalog from `SimulationEnvironment` status, resolves the workload, and
+profile catalog from `VcrGpuCluster` status, resolves the workload, and
 returns a patch.
 
 The specification says admission "does not download profile images or create

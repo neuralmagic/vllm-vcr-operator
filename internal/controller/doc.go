@@ -1,5 +1,5 @@
-// +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=simulationenvironments,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=simulationenvironments/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuclusters,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
@@ -7,18 +7,18 @@
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
-// Package controller reconciles the cluster-scoped SimulationEnvironment: the
+// Package controller reconciles the cluster-scoped VcrGpuCluster: the
 // reconciled profile catalog published in status, and the device-plugin
 // DaemonSet that advertises synthetic GPUs on simulation nodes.
 //
 // # What this package owns
 //
-//   - The singleton SimulationEnvironment (name "default") and its status:
+//   - The singleton VcrGpuCluster (name "default") and its status:
 //     supportedVLLMVersion, the resolved profile catalog, and the Ready,
 //     ProfilesReconciled and DevicePluginReady conditions.
 //   - The synthetic-GPU device-plugin DaemonSet and the ConfigMap that carries
 //     its device count file. Both live in the operator namespace and are owned
-//     by the cluster-scoped SimulationEnvironment, so deleting the environment
+//     by the cluster-scoped VcrGpuCluster, so deleting the environment
 //     deletes them.
 //
 // It never mutates Pods. Admission pins the reconciled profile digest on each

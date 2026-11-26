@@ -100,7 +100,7 @@ const (
 	// ManagedByLabel marks operator-managed resources.
 	ManagedByLabel = LabelPrefix + "managed-by"
 
-	// EnvironmentLabel records which SimulationEnvironment produced a resource.
+	// EnvironmentLabel records which VcrGpuCluster produced a resource.
 	EnvironmentLabel = LabelPrefix + "environment"
 
 	// ProfileCatalogSchemaVersion is the profile metadata schema version the

@@ -1,6 +1,6 @@
-# The singleton SimulationEnvironment for the H200 profiles.
+# The singleton VcrGpuCluster for the H200 profiles.
 #
-# This is the fixture form of config/samples/vcr_v1alpha1_simulationenvironment.yaml:
+# This is the fixture form of config/samples/vcr_v1alpha1_vcrgpucluster.yaml:
 # the same configuration, with a placeholder profile image that is pinned by
 # digest, because every admitted Pod is pinned by digest and a tag would hide the
 # fact that no profile release exists yet.
@@ -19,7 +19,7 @@
 #     nvidia.com/gpu, because only the workload's own container holds the
 #     synthetic allocation
 apiVersion: vcr.opendatahub-io/v1alpha1
-kind: SimulationEnvironment
+kind: VcrGpuCluster
 metadata:
   name: default
 spec:

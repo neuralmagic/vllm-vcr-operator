@@ -119,11 +119,11 @@ func digestReference(ref, digest string) string {
 
 // environmentReconciler builds the reconciler under test with an injected
 // registry and no cluster.
-func environmentReconciler(t *testing.T, reg *fakeRegistry, objects ...client.Object) (*controller.SimulationEnvironmentReconciler, client.Client, *record.FakeRecorder) {
+func environmentReconciler(t *testing.T, reg *fakeRegistry, objects ...client.Object) (*controller.VcrGpuClusterReconciler, client.Client, *record.FakeRecorder) {
 	t.Helper()
 	c := testClient(t, objects...)
 	recorder := record.NewFakeRecorder(32)
-	reconciler, err := controller.NewSimulationEnvironmentReconciler(controller.Options{
+	reconciler, err := controller.NewVcrGpuClusterReconciler(controller.Options{
 		Client:            c,
 		OperatorNamespace: testOperatorNamespace,
 		DevicePluginImage: testDevicePluginImage,
@@ -133,20 +133,20 @@ func environmentReconciler(t *testing.T, reg *fakeRegistry, objects ...client.Ob
 		Recorder:          recorder,
 	})
 	if err != nil {
-		t.Fatalf("NewSimulationEnvironmentReconciler returned error: %v", err)
+		t.Fatalf("NewVcrGpuClusterReconciler returned error: %v", err)
 	}
 	return reconciler, c, recorder
 }
 
 // reconcile runs one reconcile and returns the stored environment.
-func reconcile(t *testing.T, reconciler *controller.SimulationEnvironmentReconciler, c client.Client) (*vcrv1alpha1.SimulationEnvironment, ctrl.Result) {
+func reconcile(t *testing.T, reconciler *controller.VcrGpuClusterReconciler, c client.Client) (*vcrv1alpha1.VcrGpuCluster, ctrl.Result) {
 	t.Helper()
-	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}}
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: vcrv1alpha1.VcrGpuClusterNameDefault}}
 	result, err := reconciler.Reconcile(context.Background(), request)
 	if err != nil {
 		t.Fatalf("Reconcile returned error: %v", err)
 	}
-	stored := &vcrv1alpha1.SimulationEnvironment{}
+	stored := &vcrv1alpha1.VcrGpuCluster{}
 	if err := c.Get(context.Background(), request.NamespacedName, stored); err != nil {
 		t.Fatalf("get reconciled environment: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestReconcileRejectsANonDefaultEnvironmentName(t *testing.T) {
 	if err == nil {
 		t.Fatal("Reconcile accepted a non-default environment name, want a rejection naming the accepted name")
 	}
-	for _, want := range []string{env.Name, vcrv1alpha1.SimulationEnvironmentNameDefault} {
+	for _, want := range []string{env.Name, vcrv1alpha1.VcrGpuClusterNameDefault} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %q", err.Error(), want)
 		}
@@ -602,7 +602,7 @@ func TestReconcileRejectsUnusablePullSecretWithoutLeakingIt(t *testing.T) {
 	}
 }
 
-func TestNewSimulationEnvironmentReconcilerValidatesItsConfiguration(t *testing.T) {
+func TestNewVcrGpuClusterReconcilerValidatesItsConfiguration(t *testing.T) {
 	c := testClient(t)
 	tests := []struct {
 		name   string
@@ -627,9 +627,9 @@ func TestNewSimulationEnvironmentReconcilerValidatesItsConfiguration(t *testing.
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := controller.NewSimulationEnvironmentReconciler(tc.opts)
+			_, err := controller.NewVcrGpuClusterReconciler(tc.opts)
 			if err == nil {
-				t.Fatalf("NewSimulationEnvironmentReconciler accepted a configuration without %s", tc.name)
+				t.Fatalf("NewVcrGpuClusterReconciler accepted a configuration without %s", tc.name)
 			}
 			if !strings.Contains(err.Error(), tc.absent) {
 				t.Errorf("error %q does not name the missing setting %q", err.Error(), tc.absent)
@@ -656,7 +656,7 @@ func TestReconcileIgnoresADeletedEnvironment(t *testing.T) {
 	reg := newFakeRegistry()
 	reconciler, c, _ := environmentReconciler(t, reg)
 
-	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}}
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: vcrv1alpha1.VcrGpuClusterNameDefault}}
 	result, err := reconciler.Reconcile(context.Background(), request)
 	if err != nil {
 		t.Fatalf("Reconcile of a missing environment returned error: %v", err)
@@ -679,7 +679,7 @@ func TestReconcileIgnoresADeletedEnvironment(t *testing.T) {
 	}
 }
 
-// conflictClient wraps a client and fails status writes on SimulationEnvironment
+// conflictClient wraps a client and fails status writes on VcrGpuCluster
 // objects with a conflict, the way a concurrent writer does. failures is the
 // number of updates to fail: 1 models one race, 0 (or a huge number) models a
 // writer that never stops.
@@ -713,9 +713,9 @@ type conflictStatusWriter struct {
 }
 
 func (w *conflictStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
-	if _, ok := obj.(*vcrv1alpha1.SimulationEnvironment); ok && w.owner.attempt() {
+	if _, ok := obj.(*vcrv1alpha1.VcrGpuCluster); ok && w.owner.attempt() {
 		return apierrors.NewConflict(
-			vcrv1alpha1.GroupVersion.WithResource("simulationenvironments").GroupResource(),
+			vcrv1alpha1.GroupVersion.WithResource("vcrgpuclusters").GroupResource(),
 			obj.GetName(), errors.New("the object has been modified; apply your changes to the latest version"))
 	}
 	return w.SubResourceWriter.Update(ctx, obj, opts...)
@@ -734,7 +734,7 @@ func TestReconcileRetriesAConflictingStatusUpdate(t *testing.T) {
 	conflicting := &conflictClient{Client: c, failures: 1}
 	reconciler.Client = conflicting
 
-	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}}
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: vcrv1alpha1.VcrGpuClusterNameDefault}}
 	result, err := reconciler.Reconcile(context.Background(), request)
 	if err != nil {
 		t.Fatalf("Reconcile returned error for a single status conflict, want a retried write: %v", err)
@@ -746,7 +746,7 @@ func TestReconcileRetriesAConflictingStatusUpdate(t *testing.T) {
 		t.Errorf("status update attempts = %d, want 2 (one conflict, one success)", attempts)
 	}
 
-	stored := &vcrv1alpha1.SimulationEnvironment{}
+	stored := &vcrv1alpha1.VcrGpuCluster{}
 	if err := c.Get(context.Background(), request.NamespacedName, stored); err != nil {
 		t.Fatalf("get the reconciled environment: %v", err)
 	}
@@ -772,7 +772,7 @@ func TestReconcileRequeuesWhenStatusRetriesAreExhausted(t *testing.T) {
 	conflicting := &conflictClient{Client: c, failures: 1 << 30}
 	reconciler.Client = conflicting
 
-	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}}
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: vcrv1alpha1.VcrGpuClusterNameDefault}}
 	result, err := reconciler.Reconcile(context.Background(), request)
 	if err != nil {
 		t.Fatalf("Reconcile returned error after the retry budget, want a requeue: %v", err)

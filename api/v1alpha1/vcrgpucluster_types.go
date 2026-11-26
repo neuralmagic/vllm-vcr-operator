@@ -5,37 +5,37 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// SimulationEnvironmentNameDefault is the only accepted name for a
-// SimulationEnvironment. A single cluster-scoped configuration keeps admission,
+// VcrGpuClusterNameDefault is the only accepted name for a
+// VcrGpuCluster. A single cluster-scoped configuration keeps admission,
 // device advertisement, and profile selection consistent.
-const SimulationEnvironmentNameDefault = "default"
+const VcrGpuClusterNameDefault = "default"
 
-// SimulationEnvironment configures how the operator simulates GPU-backed vLLM
+// VcrGpuCluster configures how the operator simulates GPU-backed vLLM
 // model servers on CPU-only nodes.
 //
-// A SimulationEnvironment is cluster scoped and its name must be "default". The
+// A VcrGpuCluster is cluster scoped and its name must be "default". The
 // name restriction enforces the singleton policy through API validation rather
 // than through operator conventions.
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,path=simulationenvironments,singular=simulationenvironment,shortName=sime
+// +kubebuilder:resource:scope=Cluster,path=vcrgpuclusters,singular=vcrgpucluster,shortName=vgc
 // +kubebuilder:printcolumn:name="GPU",type=string,JSONPath=`.spec.gpuType`
 // +kubebuilder:printcolumn:name="Devices",type=integer,JSONPath=`.spec.devicesPerNode`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
-// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'default'",message="only the name 'default' is accepted: a SimulationEnvironment is a singleton cluster configuration"
-type SimulationEnvironment struct {
+// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'default'",message="only the name 'default' is accepted: a VcrGpuCluster is a singleton cluster configuration"
+type VcrGpuCluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   SimulationEnvironmentSpec   `json:"spec,omitempty"`
-	Status SimulationEnvironmentStatus `json:"status,omitempty"`
+	Spec   VcrGpuClusterSpec   `json:"spec,omitempty"`
+	Status VcrGpuClusterStatus `json:"status,omitempty"`
 }
 
-// SimulationEnvironmentSpec selects simulation nodes, synthetic GPU capacity,
+// VcrGpuClusterSpec selects simulation nodes, synthetic GPU capacity,
 // the simulated accelerator, available recorded profiles, and the real
 // resources given to the simulated serving runtime.
-type SimulationEnvironmentSpec struct {
+type VcrGpuClusterSpec struct {
 	// SimulationNodes selects the nodes on which the operator advertises
 	// synthetic GPUs. Admission rewrites GPU-specific placement so that
 	// simulated Pods become eligible for these nodes.
@@ -138,9 +138,9 @@ type RuntimeSizing struct {
 	Provisioner *corev1.ResourceRequirements `json:"provisioner,omitempty"`
 }
 
-// SimulationEnvironmentStatus reports reconciliation results. Profile metadata
+// VcrGpuClusterStatus reports reconciliation results. Profile metadata
 // is published here so that admission never contacts a registry.
-type SimulationEnvironmentStatus struct {
+type VcrGpuClusterStatus struct {
 	// ObservedGeneration is the spec generation last reconciled.
 	//
 	// +kubebuilder:validation:Optional
@@ -195,15 +195,15 @@ type ResolvedProfile struct {
 	Message string `json:"message,omitempty"`
 }
 
-// SimulationEnvironmentList contains a list of SimulationEnvironment.
+// VcrGpuClusterList contains a list of VcrGpuCluster.
 //
 // +kubebuilder:object:root=true
-type SimulationEnvironmentList struct {
+type VcrGpuClusterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []SimulationEnvironment `json:"items"`
+	Items           []VcrGpuCluster `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&SimulationEnvironment{}, &SimulationEnvironmentList{})
+	SchemeBuilder.Register(&VcrGpuCluster{}, &VcrGpuClusterList{})
 }

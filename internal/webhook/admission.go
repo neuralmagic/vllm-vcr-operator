@@ -51,7 +51,7 @@ func workloadDenied(detail string) *admissionv1.AdmissionResponse {
 func operatorDenied(detail string) *admissionv1.AdmissionResponse {
 	return denied("the Pod cannot be admitted: operator problem: " + detail +
 		". This is a cluster configuration or operator failure, not a workload problem; " +
-		"check the default SimulationEnvironment and the operator logs.")
+		"check the default VcrGpuCluster and the operator logs.")
 }
 
 // decodeObject unmarshals an admission object into target.

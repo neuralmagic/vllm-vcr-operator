@@ -109,9 +109,9 @@ fi
 echo "phase 1: applying namespace, CRD, RBAC, certificates, and manager"
 kubectl apply -f "$workdir/core.yaml"
 
-echo "waiting for the SimulationEnvironment CRD"
+echo "waiting for the VcrGpuCluster CRD"
 kubectl wait --for=condition=Established --timeout=60s \
-  crd/simulationenvironments.vcr.opendatahub-io
+  crd/vcrgpuclusters.vcr.opendatahub-io
 
 echo "waiting for the operator manager rollout"
 if ! kubectl -n vllm-vcr-operator-system rollout status \
@@ -148,11 +148,11 @@ if [[ "$use_cert_manager" == false ]]; then
 fi
 
 if [[ "$with_sample" == true ]]; then
-  echo "applying the sample SimulationEnvironment and modelserver"
+  echo "applying the sample VcrGpuCluster and modelserver"
   kubectl apply -k config/samples
   echo "the sample modelserver stays Pending until a node carries the"
   echo "vcr.opendatahub-io/simulation=true label selected by the environment."
 else
-  echo "next: apply a SimulationEnvironment, for example"
+  echo "next: apply a VcrGpuCluster, for example"
   echo "  kubectl apply -k config/samples"
 fi

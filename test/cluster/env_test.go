@@ -86,7 +86,7 @@ type environment struct {
 
 	nodes []corev1.Node
 	// simulationNode is the worker labelled as a simulation node,
-	// otherNode is a node that is not selected by the SimulationEnvironment.
+	// otherNode is a node that is not selected by the VcrGpuCluster.
 	simulationNode string
 	otherNode      string
 	nodeIPs        map[string]string
@@ -127,7 +127,7 @@ func loadEnvironment(t *testing.T) *environment {
 
 	clusterScheme := scheme.Scheme
 	if err := vcrv1alpha1.AddToScheme(clusterScheme); err != nil {
-		t.Fatalf("register the SimulationEnvironment API in the client scheme: %v", err)
+		t.Fatalf("register the VcrGpuCluster API in the client scheme: %v", err)
 	}
 	if err := appsv1.AddToScheme(clusterScheme); err != nil {
 		t.Fatalf("register apps/v1 in the client scheme: %v", err)
@@ -357,7 +357,7 @@ func (e *environment) applyManifests(manifests string) error {
 	return err
 }
 
-// simulationNodeLabel is the one label the SimulationEnvironment selects.
+// simulationNodeLabel is the one label the VcrGpuCluster selects.
 func simulationNodeLabel() map[string]string {
 	return map[string]string{"vcr.opendatahub-io/simulation": "true"}
 }

@@ -87,7 +87,7 @@ func TestClusterAcceptance(t *testing.T) {
 	t.Cleanup(func() { s.teardown(t) })
 }
 
-// stepInstall applies the SimulationEnvironment and waits for the operator to
+// stepInstall applies the VcrGpuCluster and waits for the operator to
 // reconcile it: the profile catalog must be published and the device plugin must
 // report ready, which is what makes the rest of the run meaningful.
 func (s *suite) stepInstall(t *testing.T) {
@@ -101,23 +101,23 @@ func (s *suite) stepInstall(t *testing.T) {
 		t.Fatalf("label %s as a simulation node: %v", s.simulationNode, err)
 	}
 
-	environment := newSimulationEnvironment(s.install.profileImage)
+	environment := newVcrGpuCluster(s.install.profileImage)
 	err := s.client.Create(ctx, environment)
 	if apierrors.IsAlreadyExists(err) {
-		var existing vcrv1alpha1.SimulationEnvironment
+		var existing vcrv1alpha1.VcrGpuCluster
 		if err := s.client.Get(ctx, client.ObjectKey{Name: environment.Name}, &existing); err != nil {
-			t.Fatalf("read the existing SimulationEnvironment: %v", err)
+			t.Fatalf("read the existing VcrGpuCluster: %v", err)
 		}
 		existing.Spec = environment.Spec
 		err = s.client.Update(ctx, &existing)
 	}
 	if err != nil {
-		t.Fatalf("apply the SimulationEnvironment: %v", err)
+		t.Fatalf("apply the VcrGpuCluster: %v", err)
 	}
 
-	t.Logf("waiting for the SimulationEnvironment to reconcile profile %s", s.install.profileImage)
+	t.Logf("waiting for the VcrGpuCluster to reconcile profile %s", s.install.profileImage)
 	err = waitFor(ctx, 4*time.Minute, 2*time.Second, func(ctx context.Context) (bool, string, error) {
-		var current vcrv1alpha1.SimulationEnvironment
+		var current vcrv1alpha1.VcrGpuCluster
 		if err := s.client.Get(ctx, client.ObjectKey{Name: environment.Name}, &current); err != nil {
 			return false, "", err
 		}
@@ -131,12 +131,12 @@ func (s *suite) stepInstall(t *testing.T) {
 	})
 	if err != nil {
 		s.dumpClusterState(t, "install")
-		t.Fatalf("the SimulationEnvironment did not become Ready: %v", err)
+		t.Fatalf("the VcrGpuCluster did not become Ready: %v", err)
 	}
 
-	var current vcrv1alpha1.SimulationEnvironment
+	var current vcrv1alpha1.VcrGpuCluster
 	if err := s.client.Get(ctx, client.ObjectKey{Name: environment.Name}, &current); err != nil {
-		t.Fatalf("read the reconciled SimulationEnvironment: %v", err)
+		t.Fatalf("read the reconciled VcrGpuCluster: %v", err)
 	}
 
 	// The published catalog is what admission pins, so assert it resolved the test
@@ -168,7 +168,7 @@ func (s *suite) stepDevicePlugin(t *testing.T) {
 		t.Fatalf("read the simulation node's allocatable capacity: %v", err)
 	}
 	if capacity != 8 {
-		t.Fatalf("node %s advertises %d %s, want 8 (the SimulationEnvironment's devicesPerNode)",
+		t.Fatalf("node %s advertises %d %s, want 8 (the VcrGpuCluster's devicesPerNode)",
 			s.simulationNode, capacity, names.SyntheticResourceName)
 	}
 
@@ -177,7 +177,7 @@ func (s *suite) stepDevicePlugin(t *testing.T) {
 		t.Fatalf("read %s's allocatable capacity: %v", s.otherNode, err)
 	}
 	if other != 0 {
-		t.Errorf("node %s advertises %d %s but is not selected by the SimulationEnvironment",
+		t.Errorf("node %s advertises %d %s but is not selected by the VcrGpuCluster",
 			s.otherNode, other, names.SyntheticResourceName)
 	}
 
@@ -277,10 +277,10 @@ func (s *suite) stepAdmission(t *testing.T) {
 	}
 
 	// The pinned profile image must be the digest the operator published, not the
-	// tag the SimulationEnvironment names.
-	var environment vcrv1alpha1.SimulationEnvironment
-	if err := s.client.Get(ctx, client.ObjectKey{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}, &environment); err != nil {
-		t.Fatalf("read the SimulationEnvironment: %v", err)
+	// tag the VcrGpuCluster names.
+	var environment vcrv1alpha1.VcrGpuCluster
+	if err := s.client.Get(ctx, client.ObjectKey{Name: vcrv1alpha1.VcrGpuClusterNameDefault}, &environment); err != nil {
+		t.Fatalf("read the VcrGpuCluster: %v", err)
 	}
 	published := environment.Status.Profiles[0]
 	pinned := strings.TrimSuffix(published.Image, ":"+tagOf(published.Image)) + "@" + published.Digest
@@ -882,19 +882,19 @@ func (s *suite) stepCleanup(t *testing.T) {
 		}
 	}
 
-	// The SimulationEnvironment is cluster scoped; deleting it removes the device
+	// The VcrGpuCluster is cluster scoped; deleting it removes the device
 	// plugin DaemonSet and its ConfigMap through ownership.
-	if err := s.client.Delete(ctx, newSimulationEnvironment("")); err != nil && !apierrors.IsNotFound(err) {
-		t.Errorf("delete the SimulationEnvironment: %v", err)
+	if err := s.client.Delete(ctx, newVcrGpuCluster("")); err != nil && !apierrors.IsNotFound(err) {
+		t.Errorf("delete the VcrGpuCluster: %v", err)
 	}
 	if err := waitFor(ctx, 2*time.Minute, 2*time.Second, func(ctx context.Context) (bool, string, error) {
-		var list vcrv1alpha1.SimulationEnvironmentList
+		var list vcrv1alpha1.VcrGpuClusterList
 		if err := s.client.List(ctx, &list); err != nil {
 			return false, "", err
 		}
-		return len(list.Items) == 0, fmt.Sprintf("%d SimulationEnvironment(s) remain", len(list.Items)), nil
+		return len(list.Items) == 0, fmt.Sprintf("%d VcrGpuCluster(s) remain", len(list.Items)), nil
 	}); err != nil {
-		t.Errorf("the SimulationEnvironment was not removed: %v", err)
+		t.Errorf("the VcrGpuCluster was not removed: %v", err)
 	}
 
 	documents, err := s.kustomizeBuild("config/default")
@@ -930,8 +930,8 @@ func (s *suite) stepCleanup(t *testing.T) {
 	if _, err := s.kubectl("get", "validatingwebhookconfiguration", "vllm-vcr-operator-validating-webhook"); err == nil {
 		t.Error("the validating webhook configuration survived the uninstall")
 	}
-	if _, err := s.kubectl("get", "crd", "simulationenvironments.vcr.opendatahub-io"); err == nil {
-		t.Error("the SimulationEnvironment CRD survived the uninstall")
+	if _, err := s.kubectl("get", "crd", "vcrgpuclusters.vcr.opendatahub-io"); err == nil {
+		t.Error("the VcrGpuCluster CRD survived the uninstall")
 	}
 	for _, namespace := range []string{operatorNamespace, registryNamespace, workloadNamespace, capacityNamespace, placementNamespace} {
 		var current corev1.Namespace
@@ -975,7 +975,7 @@ func (s *suite) teardown(t *testing.T) {
 			_ = s.client.Delete(ctx, &current)
 		}
 	}
-	_ = s.client.Delete(ctx, newSimulationEnvironment(""))
+	_ = s.client.Delete(ctx, newVcrGpuCluster(""))
 	for _, configuration := range []string{
 		"mutatingwebhookconfiguration/vllm-vcr-operator-mutating-webhook",
 		"validatingwebhookconfiguration/vllm-vcr-operator-validating-webhook",

@@ -83,8 +83,8 @@ func TestDevicePluginReconcilerCreatesDaemonSetAndDeviceCountConfigMap(t *testin
 	if owner == nil {
 		t.Fatal("DaemonSet has no controller owner reference: deleting the environment would leak it")
 	}
-	if owner.Kind != "SimulationEnvironment" || owner.Name != env.Name {
-		t.Errorf("DaemonSet controller owner = %s/%s, want SimulationEnvironment/%s", owner.Kind, owner.Name, env.Name)
+	if owner.Kind != "VcrGpuCluster" || owner.Name != env.Name {
+		t.Errorf("DaemonSet controller owner = %s/%s, want VcrGpuCluster/%s", owner.Kind, owner.Name, env.Name)
 	}
 	if daemonSet.Labels[names.ManagedByLabel] != names.OperatorName {
 		t.Errorf("DaemonSet label %q = %q, want %q", names.ManagedByLabel, daemonSet.Labels[names.ManagedByLabel], names.OperatorName)
@@ -191,7 +191,7 @@ func TestDevicePluginReconcilerCreatesDaemonSetAndDeviceCountConfigMap(t *testin
 		t.Errorf("device count file content = %q, want %q from spec.devicesPerNode", got, want)
 	}
 	if owner := metav1.GetControllerOf(configMap); owner == nil || owner.Name != env.Name {
-		t.Errorf("device count ConfigMap owner = %+v, want the SimulationEnvironment", owner)
+		t.Errorf("device count ConfigMap owner = %+v, want the VcrGpuCluster", owner)
 	}
 
 	if state.Desired != 0 || state.Ready != 0 {

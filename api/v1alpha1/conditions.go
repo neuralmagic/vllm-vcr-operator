@@ -1,6 +1,6 @@
 package v1alpha1
 
-// Condition types published on the SimulationEnvironment.
+// Condition types published on the VcrGpuCluster.
 //
 // They live in the API package rather than in the reconciler so that every reader
 // of status — admission, the device plugin wiring, and the acceptance tests — names

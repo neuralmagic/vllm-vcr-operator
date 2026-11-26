@@ -11,7 +11,7 @@
 # docs/contracts/profile-image.md). The reference below is a documented
 # placeholder: replace it with a digest-pinned profile image before use.
 apiVersion: vcr.opendatahub-io/v1alpha1
-kind: SimulationEnvironment
+kind: VcrGpuCluster
 metadata:
   name: default
 spec:

@@ -11,7 +11,7 @@ interfaces look like; the assertions live in `test/e2e` (`make test-e2e`) and
 
 Both rely on the fixtures in `test/fixtures/`: the namespace
 `vllm-vcr-simulated`, the ServiceAccount `mock-pc-sa`, and a
-`SimulationEnvironment` with a real profile image.
+`VcrGpuCluster` with a real profile image.
 
 ## Walkthrough
 
@@ -26,7 +26,7 @@ kubectl label node <node> vcr.opendatahub-io/simulation=true
 #    digest-pinned one: docs/profile-contract.md explains how profiles are built
 #    and published.
 kubectl apply -f test/fixtures/environments/h200.yaml
-kubectl wait --for=condition=Ready sime/default --timeout=5m
+kubectl wait --for=condition=Ready vgc/default --timeout=5m
 
 # 4. Apply an unchanged GPU-requesting workload.
 kubectl apply -k test/fixtures/llmd

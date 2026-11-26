@@ -11,7 +11,7 @@ import (
 )
 
 // Candidate is one reconciled profile entry as published in
-// SimulationEnvironment status: the configured image, its resolved digest, the
+// VcrGpuCluster status: the configured image, its resolved digest, the
 // parsed metadata, and a reconciliation message when the entry is unusable.
 type Candidate struct {
 	Image    string

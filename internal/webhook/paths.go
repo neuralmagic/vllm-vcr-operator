@@ -8,6 +8,6 @@ const (
 	PodMutatorPath = "/mutate-v1-pod"
 
 	// EnvironmentValidatorPath is the validating admission path for
-	// SimulationEnvironments.
-	EnvironmentValidatorPath = "/validate-vcr-opendatahub-io-v1alpha1-simulationenvironment"
+	// VcrGpuClusters.
+	EnvironmentValidatorPath = "/validate-vcr-opendatahub-io-v1alpha1-vcrgpucluster"
 )

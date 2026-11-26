@@ -69,10 +69,10 @@ cluster and the images.
    `certs.d` configuration (so kubelet can pull the digest-pinned profile image), and
    gives the manager `SSL_CERT_FILE` so it trusts the CA. The profile fixture image is
    pushed into that registry from the node's own containerd.
-3. **The singleton `SimulationEnvironment`**, labelled onto the worker node only, so
+3. **The singleton `VcrGpuCluster`**, labelled onto the worker node only, so
    placement is observable: the control-plane node must never advertise synthetic GPUs.
 
-Teardown deletes the workload namespaces, the `SimulationEnvironment`, the admission
+Teardown deletes the workload namespaces, the `VcrGpuCluster`, the admission
 registrations, the CRD, the RBAC, the operator and registry namespaces, the test
 `RuntimeClass`, and the simulation node label, then asserts no cluster-scoped residue
 remains. A run that fails earlier still tears down (`t.Cleanup`).
@@ -81,7 +81,7 @@ remains. A run that fails earlier still tears down (`t.Cleanup`).
 
 | Step | Assertion (all against cluster state) |
 | --- | --- |
-| install | `SimulationEnvironment` reaches `Ready`; `status.profiles[0].digest` is resolved from the test registry and its metadata is the fixture document |
+| install | `VcrGpuCluster` reaches `Ready`; `status.profiles[0].digest` is resolved from the test registry and its metadata is the fixture document |
 | device plugin | node `status.allocatable` has `nvidia.com/gpu: 8` on the simulation node and none elsewhere; the DaemonSet is Ready with one Pod on the simulation node; the Pod mounts `/var/lib/kubelet/device-plugins`, is not privileged, and uses no runtime class |
 | admission | on a real API server: provenance annotations (profile id, digest-pinned image, model, `original-gpus`, vLLM version), injected `vllm-frontend`/`vllm-vcr-backend`/`vcr-profile-provisioner`, exactly one container keeping `nvidia.com/gpu: 1`, provisioner image = digest-pinned profile image, llm-d labels/ports/ServiceAccount/model-cache volume preserved, GPU-only env removed, and a non-GPU Pod plus an unsupported (`sh -c`) workload (denied, message visible on the ReplicaSet) |
 | placement | `nvidia` runtime class and `nvidia.com/gpu.product` affinity removed, simulation node selector applied, `kubernetes.io/os=linux` affinity preserved; an unsatisfiable *non-accelerator* constraint is admitted and left `Pending` with the scheduler's `FailedScheduling` message (documented behavior) |
@@ -89,7 +89,7 @@ remains. A run that fails earlier still tears down (`t.Cleanup`).
 | allocation / exhaustion / release | 8 replicas × 1 device with one device already held: 7 schedule, 1 stays `Pending` with `Insufficient nvidia.com/gpu`; deleting the holder's Deployment releases the device and the pending replica schedules and becomes Ready |
 | plugin restart | deleting the device-plugin Pod yields a new Ready Pod, allocatable capacity returns to 8, and an existing allocation keeps running without a container restart (kubelet owns allocation state) |
 | readiness withdrawal | making the simulator stop answering its control API withdraws readiness (and it stays withdrawn), the supervisor terminates the frontend after its grace period, kubelet's restart policy is what recovers it, the supervisor never restarts the simulator container, restoring the engine makes the Pod Ready again, and crashing the simulator container shows kubelet restarting it |
-| cleanup | no namespaces, CRD, admission registrations, `SimulationEnvironment`, or reachable test registry remain |
+| cleanup | no namespaces, CRD, admission registrations, `VcrGpuCluster`, or reachable test registry remain |
 
 ## Failure diagnostics
 
@@ -98,7 +98,7 @@ On failure the step writes, under `test/cluster/_artifacts/<step>/`:
 - `pods.yaml`, `pods.txt`, `deployments.yaml`, `replicasets.txt`, `events.txt`
 - `injected-args.txt` — every container's `command`/`args` as admitted
 - `describe-<pod>.txt`, `logs-<pod>-<container>.txt` (and `--previous` logs)
-- `simulationenvironment.yaml`, `nodes.txt`, `node-allocatable.txt`
+- `vcrgpucluster.yaml`, `nodes.txt`, `node-allocatable.txt`
 - `operator-logs.txt`, `device-plugin-pods.txt`, `device-plugin-describe.txt`
 
 The directory is gitignored by `test/cluster/_artifacts/.gitignore`.

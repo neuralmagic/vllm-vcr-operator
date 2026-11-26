@@ -16,7 +16,7 @@ network API; only inference execution is simulated.
 | Profile exporter | `cmd/profileexport` | Shipped inside profile images; copies metadata + trace into the Pod volume |
 | Translator/runtime (library) | `internal/translator`, `internal/runtime` | Turns a workload into settings, a plan, and a mutated Pod |
 
-Configuration is one cluster-scoped CR, `SimulationEnvironment`, name `default`
+Configuration is one cluster-scoped CR, `VcrGpuCluster`, name `default`
 only (enforced by a CRD rule, not convention). Nothing else is a CR: profile
 metadata lives in the CR's status, not in a `Profile` resource.
 

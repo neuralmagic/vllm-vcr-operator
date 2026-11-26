@@ -31,20 +31,20 @@ func testClient(t *testing.T, objects ...client.Object) client.Client {
 	t.Helper()
 	return fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
-		WithStatusSubresource(&vcrv1alpha1.SimulationEnvironment{}).
+		WithStatusSubresource(&vcrv1alpha1.VcrGpuCluster{}).
 		WithObjects(objects...).
 		Build()
 }
 
-// testEnvironment returns a SimulationEnvironment with the singleton name and a
+// testEnvironment returns a VcrGpuCluster with the singleton name and a
 // node selector, which the CRD requires to be non-empty.
-func testEnvironment() *vcrv1alpha1.SimulationEnvironment {
-	return &vcrv1alpha1.SimulationEnvironment{
+func testEnvironment() *vcrv1alpha1.VcrGpuCluster {
+	return &vcrv1alpha1.VcrGpuCluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       vcrv1alpha1.SimulationEnvironmentNameDefault,
+			Name:       vcrv1alpha1.VcrGpuClusterNameDefault,
 			Generation: 1,
 		},
-		Spec: vcrv1alpha1.SimulationEnvironmentSpec{
+		Spec: vcrv1alpha1.VcrGpuClusterSpec{
 			NodeSelection: vcrv1alpha1.NodeSelection{
 				NodeSelector: map[string]string{"vcr.opendatahub-io/simulation": "true"},
 			},
@@ -115,7 +115,7 @@ func contractMetadata(t *testing.T, id, model string) []byte {
 	return raw
 }
 
-func conditionOf(t *testing.T, env *vcrv1alpha1.SimulationEnvironment, conditionType string) metav1.Condition {
+func conditionOf(t *testing.T, env *vcrv1alpha1.VcrGpuCluster, conditionType string) metav1.Condition {
 	t.Helper()
 	for _, condition := range env.Status.Conditions {
 		if condition.Type == conditionType {

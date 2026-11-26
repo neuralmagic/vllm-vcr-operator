@@ -27,24 +27,24 @@ func TestSingletonConfigurationIsEnforcedByTheAPIServer(t *testing.T) {
 	err := h.client.Create(helperContext(t), other)
 	if err == nil {
 		_ = h.client.Delete(helperContext(t), other)
-		t.Fatal("the API server accepted a SimulationEnvironment named \"simulation\", want the singleton rule to reject it")
+		t.Fatal("the API server accepted a VcrGpuCluster named \"simulation\", want the singleton rule to reject it")
 	}
 	if !apierrors.IsInvalid(err) && !apierrors.IsForbidden(err) {
 		t.Errorf("create error is %T (%v), want an API validation or admission rejection", err, err)
 	}
-	if !strings.Contains(err.Error(), vcrv1alpha1.SimulationEnvironmentNameDefault) {
-		t.Errorf("rejection %q does not name the only accepted name %q", err, vcrv1alpha1.SimulationEnvironmentNameDefault)
+	if !strings.Contains(err.Error(), vcrv1alpha1.VcrGpuClusterNameDefault) {
+		t.Errorf("rejection %q does not name the only accepted name %q", err, vcrv1alpha1.VcrGpuClusterNameDefault)
 	}
-	rejected := &vcrv1alpha1.SimulationEnvironment{}
+	rejected := &vcrv1alpha1.VcrGpuCluster{}
 	if getErr := h.client.Get(helperContext(t), types.NamespacedName{Name: "simulation"}, rejected); !apierrors.IsNotFound(getErr) {
-		t.Errorf("the rejected SimulationEnvironment exists (get returned %v)", getErr)
+		t.Errorf("the rejected VcrGpuCluster exists (get returned %v)", getErr)
 	}
 
 	duplicate := baselineEnvironment()
 	duplicateErr := h.client.Create(helperContext(t), duplicate)
 	if duplicateErr == nil {
 		_ = h.client.Delete(helperContext(t), duplicate)
-		t.Fatal("the API server accepted a second SimulationEnvironment named \"default\"")
+		t.Fatal("the API server accepted a second VcrGpuCluster named \"default\"")
 	}
 	if !apierrors.IsAlreadyExists(duplicateErr) {
 		t.Errorf("duplicate create error is %T (%v), want AlreadyExists", duplicateErr, duplicateErr)
@@ -107,8 +107,8 @@ func TestProfileReconciliationPublishesTheCatalog(t *testing.T) {
 	if err := h.client.Get(helperContext(t), key, daemonSet); err != nil {
 		t.Fatalf("device plugin DaemonSet %s: %v", key, err)
 	}
-	if len(daemonSet.OwnerReferences) == 0 || daemonSet.OwnerReferences[0].Name != vcrv1alpha1.SimulationEnvironmentNameDefault {
-		t.Errorf("device plugin DaemonSet owner references = %+v, want the SimulationEnvironment", daemonSet.OwnerReferences)
+	if len(daemonSet.OwnerReferences) == 0 || daemonSet.OwnerReferences[0].Name != vcrv1alpha1.VcrGpuClusterNameDefault {
+		t.Errorf("device plugin DaemonSet owner references = %+v, want the VcrGpuCluster", daemonSet.OwnerReferences)
 	}
 	if got := daemonSet.Spec.Template.Spec.NodeSelector[simulationNodeLabel]; got != "true" {
 		t.Errorf("device plugin node selector = %v, want the environment's simulation node selection", daemonSet.Spec.Template.Spec.NodeSelector)

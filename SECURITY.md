@@ -7,7 +7,7 @@ private vulnerability reporting on this repository (Security → Report a
 vulnerability). Do not open a public issue for an unfixed problem.
 
 Include the version or commit, the affected configuration
-(`SimulationEnvironment`, workload manifest), and what an attacker gains.
+(`VcrGpuCluster`, workload manifest), and what an attacker gains.
 
 ## Scope worth thinking about
 

@@ -138,17 +138,17 @@ func newCATrustConfigMap(ca []byte) *corev1.ConfigMap {
 	}
 }
 
-// newSimulationEnvironment returns the singleton configuration the suite applies.
+// newVcrGpuCluster returns the singleton configuration the suite applies.
 //
 // It is the shape of test/fixtures/environments/h200.yaml with two deliberate
 // differences: the profile image is the fixture image the suite pushes to its own
 // registry (a digest-pinned placeholder cannot be pulled by anything), and the
 // runtime sizing is small so nine single-GPU Pods fit on one node and capacity
 // exhaustion — not CPU pressure — is what leaves a Pod Pending.
-func newSimulationEnvironment(profileImage string) *vcrv1alpha1.SimulationEnvironment {
-	return &vcrv1alpha1.SimulationEnvironment{
-		ObjectMeta: metav1.ObjectMeta{Name: vcrv1alpha1.SimulationEnvironmentNameDefault},
-		Spec: vcrv1alpha1.SimulationEnvironmentSpec{
+func newVcrGpuCluster(profileImage string) *vcrv1alpha1.VcrGpuCluster {
+	return &vcrv1alpha1.VcrGpuCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: vcrv1alpha1.VcrGpuClusterNameDefault},
+		Spec: vcrv1alpha1.VcrGpuClusterSpec{
 			NodeSelection: vcrv1alpha1.NodeSelection{
 				NodeSelector: simulationNodeLabel(),
 				Tolerations: []corev1.Toleration{{

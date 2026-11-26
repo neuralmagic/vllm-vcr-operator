@@ -31,7 +31,7 @@ type installState struct {
 	registryHost string
 	// registryNode is the node the registry is pinned to.
 	registryNode string
-	// profileImage is the tag reference the SimulationEnvironment names. The
+	// profileImage is the tag reference the VcrGpuCluster names. The
 	// operator resolves and pins it; the suite never asserts a digest it computed
 	// itself.
 	profileImage string
@@ -144,9 +144,9 @@ func (s *suite) installOperator(t *testing.T) {
 	// fails if that label regresses.
 
 	if _, err := s.kubectl("wait", "--for=condition=Established", "--timeout=120s",
-		"crd/simulationenvironments.vcr.opendatahub-io"); err != nil {
+		"crd/vcrgpuclusters.vcr.opendatahub-io"); err != nil {
 		s.dumpClusterState(t, "install")
-		t.Fatalf("the SimulationEnvironment CRD did not become Established: %v", err)
+		t.Fatalf("the VcrGpuCluster CRD did not become Established: %v", err)
 	}
 	if _, err := s.kubectl("-n", operatorNamespace, "rollout", "status",
 		"deployment/vllm-vcr-operator-controller-manager", "--timeout=180s"); err != nil {

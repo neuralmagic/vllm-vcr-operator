@@ -77,7 +77,7 @@ kubectl apply -k config/samples
 kubectl label node <node> vcr.opendatahub-io/simulation=true
 
 # 3. Watch the environment reconcile: the profile catalog and the device plugin.
-kubectl get sime default -w
+kubectl get vgc default -w
 kubectl -n vllm-vcr-operator-system get ds vllm-vcr-device-plugin
 
 # 4. The sample GPU workload is applied by step 2 — unchanged, with no simulator
@@ -148,7 +148,7 @@ images you built or the release images from this repository's release workflow.
 
 | Path | Contents |
 | --- | --- |
-| `api/v1alpha1` | The cluster-scoped `SimulationEnvironment` API |
+| `api/v1alpha1` | The cluster-scoped `VcrGpuCluster` API |
 | `internal/vllm` | vLLM 0.33.0 invocation and configuration resolution |
 | `internal/profile` | Profile metadata, catalog, and selection rules |
 | `internal/translator` | Settings policy → admission plan |

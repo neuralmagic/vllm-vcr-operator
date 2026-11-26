@@ -80,7 +80,7 @@ func joinReasons(primary, secondary []string) string {
 // entry, and an unusable one carries the reason it cannot be selected. The
 // catalog is built from all entries so a recorded identity that resolves to two
 // digests is reported here rather than at admission time.
-func (r *SimulationEnvironmentReconciler) reconcileProfiles(ctx context.Context, env *vcrv1alpha1.SimulationEnvironment) profileReconciliation {
+func (r *VcrGpuClusterReconciler) reconcileProfiles(ctx context.Context, env *vcrv1alpha1.VcrGpuCluster) profileReconciliation {
 	result := profileReconciliation{configured: len(env.Spec.Profiles)}
 	seen := make(map[string]struct{}, len(env.Spec.Profiles))
 	candidates := make([]profile.Candidate, 0, len(env.Spec.Profiles))
@@ -117,9 +117,9 @@ func (r *SimulationEnvironmentReconciler) reconcileProfiles(ctx context.Context,
 // reconcileProfile resolves one configured profile image. It returns the entry to
 // publish, the candidate for the catalog, a reason when the entry is unusable,
 // and whether the failure is retryable.
-func (r *SimulationEnvironmentReconciler) reconcileProfile(
+func (r *VcrGpuClusterReconciler) reconcileProfile(
 	ctx context.Context,
-	env *vcrv1alpha1.SimulationEnvironment,
+	env *vcrv1alpha1.VcrGpuCluster,
 	source vcrv1alpha1.ProfileSource,
 ) (vcrv1alpha1.ResolvedProfile, profile.Candidate, string, bool) {
 	if prior, ok := previouslyReconciled(env.Status.Profiles, source.Image); ok {
@@ -220,7 +220,7 @@ func devicePluginCondition(state DevicePluginState, reconciler *DevicePluginReco
 
 // readyCondition summarises the other two conditions. The message is the failing
 // condition's message so the reason for unreadiness is never hidden.
-func readyCondition(status *vcrv1alpha1.SimulationEnvironmentStatus) metav1.Condition {
+func readyCondition(status *vcrv1alpha1.VcrGpuClusterStatus) metav1.Condition {
 	profiles := meta.FindStatusCondition(status.Conditions, vcrv1alpha1.ConditionProfilesReconciled)
 	if profiles == nil || profiles.Status != metav1.ConditionTrue {
 		return metav1.Condition{
@@ -240,7 +240,7 @@ func readyCondition(status *vcrv1alpha1.SimulationEnvironmentStatus) metav1.Cond
 	return metav1.Condition{
 		Status: metav1.ConditionTrue,
 		Reason: vcrv1alpha1.ReasonEnvironmentReady,
-		Message: fmt.Sprintf("SimulationEnvironment is ready: %d profile image(s) published; %s",
+		Message: fmt.Sprintf("VcrGpuCluster is ready: %d profile image(s) published; %s",
 			len(status.Profiles), devicePlugin.Message),
 	}
 }

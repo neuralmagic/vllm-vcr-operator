@@ -8,7 +8,7 @@
 #
 # Paths match the constants registered by internal/webhook (ticket 08):
 #   /mutate-v1-pod
-#   /validate-vcr-opendatahub-io-v1alpha1-simulationenvironment
+#   /validate-vcr-opendatahub-io-v1alpha1-vcrgpucluster
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

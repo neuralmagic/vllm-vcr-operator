@@ -81,11 +81,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	environmentReconciler, err := controller.NewSimulationEnvironmentReconciler(controller.Options{
+	environmentReconciler, err := controller.NewVcrGpuClusterReconciler(controller.Options{
 		Client:            mgr.GetClient(),
 		OperatorNamespace: operatorNS,
 		DevicePluginImage: controller.DevicePluginImageFromEnv(os.Getenv),
-		Recorder:          mgr.GetEventRecorderFor("simulationenvironment"),
+		Recorder:          mgr.GetEventRecorderFor("vcrgpucluster"),
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to create the simulation environment reconciler")

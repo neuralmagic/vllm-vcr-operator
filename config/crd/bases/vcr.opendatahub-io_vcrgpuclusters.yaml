@@ -4,16 +4,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.5
-  name: simulationenvironments.vcr.opendatahub-io
+  name: vcrgpuclusters.vcr.opendatahub-io
 spec:
   group: vcr.opendatahub-io
   names:
-    kind: SimulationEnvironment
-    listKind: SimulationEnvironmentList
-    plural: simulationenvironments
+    kind: VcrGpuCluster
+    listKind: VcrGpuClusterList
+    plural: vcrgpuclusters
     shortNames:
-    - sime
-    singular: simulationenvironment
+    - vgc
+    singular: vcrgpucluster
   scope: Cluster
   versions:
   - additionalPrinterColumns:
@@ -30,10 +30,10 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          SimulationEnvironment configures how the operator simulates GPU-backed vLLM
+          VcrGpuCluster configures how the operator simulates GPU-backed vLLM
           model servers on CPU-only nodes.
 
-          A SimulationEnvironment is cluster scoped and its name must be "default". The
+          A VcrGpuCluster is cluster scoped and its name must be "default". The
           name restriction enforces the singleton policy through API validation rather
           than through operator conventions.
         properties:
@@ -56,7 +56,7 @@ spec:
             type: object
           spec:
             description: |-
-              SimulationEnvironmentSpec selects simulation nodes, synthetic GPU capacity,
+              VcrGpuClusterSpec selects simulation nodes, synthetic GPU capacity,
               the simulated accelerator, available recorded profiles, and the real
               resources given to the simulated serving runtime.
             properties:
@@ -380,7 +380,7 @@ spec:
             type: object
           status:
             description: |-
-              SimulationEnvironmentStatus reports reconciliation results. Profile metadata
+              VcrGpuClusterStatus reports reconciliation results. Profile metadata
               is published here so that admission never contacts a registry.
             properties:
               conditions:
@@ -492,8 +492,8 @@ spec:
             type: object
         type: object
         x-kubernetes-validations:
-        - message: 'only the name ''default'' is accepted: a SimulationEnvironment
-            is a singleton cluster configuration'
+        - message: 'only the name ''default'' is accepted: a VcrGpuCluster is a singleton
+            cluster configuration'
           rule: self.metadata.name == 'default'
     served: true
     storage: true

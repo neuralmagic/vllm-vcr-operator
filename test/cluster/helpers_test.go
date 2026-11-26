@@ -514,13 +514,13 @@ func (s *suite) artifactDir(t *testing.T, step string) string {
 }
 
 // dumpClusterState writes everything a failure investigation needs: the
-// SimulationEnvironment, node capacity, every test namespace's Pods, describes,
+// VcrGpuCluster, node capacity, every test namespace's Pods, describes,
 // logs, the injected container arguments, and the operator's logs.
 func (s *suite) dumpClusterState(t *testing.T, step string) {
 	t.Helper()
 	dir := s.artifactDir(t, step)
 
-	s.kubectlToFile(dir, "simulationenvironment.yaml", "get", "simulationenvironment", "default", "-o", "yaml")
+	s.kubectlToFile(dir, "vcrgpucluster.yaml", "get", "vcrgpucluster", "default", "-o", "yaml")
 	s.kubectlToFile(dir, "nodes.txt", "get", "nodes", "-o", "wide")
 	s.kubectlToFile(dir, "node-allocatable.txt", "get", "nodes", "-o",
 		`jsonpath={range .items[*]}{.metadata.name}{"\t"}{.status.allocatable.nvidia\.com/gpu}{"\t"}{.status.capacity.nvidia\.com/gpu}{"\n"}{end}`)

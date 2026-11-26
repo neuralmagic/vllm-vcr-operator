@@ -133,7 +133,7 @@ build_has "operator namespace admits the device plugin's hostPath (Pod Security 
    | .metadata.labels["pod-security.kubernetes.io/enforce"]
    | select(. == "privileged")'
 
-build_has "SimulationEnvironment CRD is cluster scoped" \
+build_has "VcrGpuCluster CRD is cluster scoped" \
   'select(.kind == "CustomResourceDefinition" and .spec.scope == "Cluster")'
 build_has "CRD keeps the singleton CEL rule" \
   'select(.kind == "CustomResourceDefinition")
@@ -202,7 +202,7 @@ done
 # 4. Admission registration matches the webhook paths the Go code registers.
 ########################################
 mutating_path='/mutate-v1-pod'
-validating_path='/validate-vcr-opendatahub-io-v1alpha1-simulationenvironment'
+validating_path='/validate-vcr-opendatahub-io-v1alpha1-vcrgpucluster'
 
 build_has "mutating webhook path $mutating_path" \
   "$MUTATING_SEL"' | select(.clientConfig.service.path == "'"$mutating_path"'")'
@@ -246,11 +246,11 @@ fi
 build_has "validating webhook path $validating_path" \
   "$VALIDATING_SEL"' | select(.clientConfig.service.path == "'"$validating_path"'")'
 
-build_has "validating webhook validates simulationenvironments, fail-closed" \
+build_has "validating webhook validates vcrgpuclusters, fail-closed" \
   "$VALIDATING_SEL"' | select(.failurePolicy == "Fail"
      and .sideEffects == "None"
      and (.admissionReviewVersions | any_c(. == "v1"))
-     and (.rules[0].resources | any_c(. == "simulationenvironments")))'
+     and (.rules[0].resources | any_c(. == "vcrgpuclusters")))'
 
 # CA injection is wired through cert-manager; both registrations must point at the
 # Certificate that also issues the manager's serving certificate.
@@ -289,9 +289,9 @@ require_rbac "" pods get list watch
 require_rbac "" secrets get list watch create update delete
 require_rbac "" nodes get list watch
 require_rbac apps daemonsets get list watch create update patch delete
-require_rbac vcr.opendatahub-io simulationenvironments get list watch update patch
-require_rbac vcr.opendatahub-io simulationenvironments/status get update patch
-ok "RBAC covers pods, secrets, nodes, daemonsets, simulationenvironments(+status)"
+require_rbac vcr.opendatahub-io vcrgpuclusters get list watch update patch
+require_rbac vcr.opendatahub-io vcrgpuclusters/status get update patch
+ok "RBAC covers pods, secrets, nodes, daemonsets, vcrgpuclusters(+status)"
 
 build_has "manager ServiceAccount is bound to manager-role" \
   'select(.kind == "ClusterRoleBinding" and .roleRef.name == "manager-role")
@@ -325,7 +325,7 @@ done < <(grep -rl "nvidia.com/gpu" config/ 2>/dev/null || true)
 # 7. Samples: the fixture is an unchanged GPU-requesting llm-d workload, and the
 #    environment sample is the singleton.
 ########################################
-sample_env=config/samples/vcr_v1alpha1_simulationenvironment.yaml
+sample_env=config/samples/vcr_v1alpha1_vcrgpucluster.yaml
 sample_workload=config/samples/llmd-modelserver-deployment.yaml
 
 if [[ "$(yq -r '.metadata.name' "$sample_env")" == "default" ]]; then

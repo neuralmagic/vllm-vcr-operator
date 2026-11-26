@@ -5,7 +5,7 @@
 // The translator is the operator's settings policy (docs/settings-policy.md). It
 // resolves nothing itself: internal/vllm already reports the workload's effective
 // vLLM configuration, internal/profile already reports the recorded profiles, and
-// the caller already resolved the SimulationEnvironment. What this package adds is
+// the caller already resolved the VcrGpuCluster. What this package adds is
 // the mapping from those three inputs to one concrete runtime layout:
 //
 //   - every setting the workload actually set has an explicit disposition
@@ -37,7 +37,7 @@ import (
 	"github.com/neuralmagic/vllm-vcr-operator/internal/vllm"
 )
 
-// Environment is the resolved SimulationEnvironment configuration admission
+// Environment is the resolved VcrGpuCluster configuration admission
 // needs. The caller resolves the custom resource into this value; the translator
 // never reads the API server.
 type Environment struct {

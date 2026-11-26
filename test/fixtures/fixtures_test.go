@@ -96,25 +96,25 @@ func TestEveryFixtureManifestParses(t *testing.T) {
 	}
 }
 
-// TestSimulationEnvironmentFixtureDecodesIntoTheAPI asserts the H200 environment
-// fixture is a valid SimulationEnvironment for the current API: the singleton
+// TestVcrGpuClusterFixtureDecodesIntoTheAPI asserts the H200 environment
+// fixture is a valid VcrGpuCluster for the current API: the singleton
 // name, the simulated accelerator, the per-node device count, and runtime sizing
 // that does not request the synthetic resource (only the workload's own container
 // holds that allocation).
-func TestSimulationEnvironmentFixtureDecodesIntoTheAPI(t *testing.T) {
+func TestVcrGpuClusterFixtureDecodesIntoTheAPI(t *testing.T) {
 	path := filepath.Join("environments", "h200.yaml")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
 
-	var environment v1alpha1.SimulationEnvironment
+	var environment v1alpha1.VcrGpuCluster
 	if err := yaml.UnmarshalStrict(raw, &environment); err != nil {
-		t.Fatalf("%s does not decode into v1alpha1.SimulationEnvironment: %v", path, err)
+		t.Fatalf("%s does not decode into v1alpha1.VcrGpuCluster: %v", path, err)
 	}
 
-	if environment.Name != v1alpha1.SimulationEnvironmentNameDefault {
-		t.Errorf("name = %q, want the only accepted name %q", environment.Name, v1alpha1.SimulationEnvironmentNameDefault)
+	if environment.Name != v1alpha1.VcrGpuClusterNameDefault {
+		t.Errorf("name = %q, want the only accepted name %q", environment.Name, v1alpha1.VcrGpuClusterNameDefault)
 	}
 	if environment.Spec.GPUType != "H200" {
 		t.Errorf("gpuType = %q", environment.Spec.GPUType)

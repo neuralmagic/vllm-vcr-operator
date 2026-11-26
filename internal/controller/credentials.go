@@ -33,7 +33,7 @@ func (c registryCredentials) authenticate(_ context.Context, host string) (authn
 // image. A profile-level secret replaces the environment-wide list rather than
 // adding to it, so a single profile can pull from a private registry without
 // changing the credentials every other profile uses.
-func pullSecretNames(env *vcrv1alpha1.SimulationEnvironment, source vcrv1alpha1.ProfileSource) []string {
+func pullSecretNames(env *vcrv1alpha1.VcrGpuCluster, source vcrv1alpha1.ProfileSource) []string {
 	if source.PullSecretName != "" {
 		return []string{source.PullSecretName}
 	}
@@ -48,9 +48,9 @@ func pullSecretNames(env *vcrv1alpha1.SimulationEnvironment, source vcrv1alpha1.
 //
 // Errors name the Secret and the expected key, never a value: a Secret payload
 // must not reach status, conditions, events, or logs.
-func (r *SimulationEnvironmentReconciler) pullCredentials(
+func (r *VcrGpuClusterReconciler) pullCredentials(
 	ctx context.Context,
-	env *vcrv1alpha1.SimulationEnvironment,
+	env *vcrv1alpha1.VcrGpuCluster,
 	source vcrv1alpha1.ProfileSource,
 ) (registryCredentials, error) {
 	credentialsByHost := registryCredentials{}

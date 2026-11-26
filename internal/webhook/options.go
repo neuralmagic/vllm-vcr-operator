@@ -50,7 +50,7 @@ func BackendImageFromEnv(getenv func(string) string) string {
 // Options configures the admission webhooks.
 type Options struct {
 	// Client is the manager's client. It reads the singleton
-	// SimulationEnvironment (from the cache, so admission never waits on the API
+	// VcrGpuCluster (from the cache, so admission never waits on the API
 	// server for it) and writes projected pull Secrets.
 	Client client.Client
 
@@ -81,7 +81,7 @@ type Options struct {
 	// Secret. Default: time.Now.
 	Now func() time.Time
 
-	// Recorder emits a warning event on the SimulationEnvironment when an
+	// Recorder emits a warning event on the VcrGpuCluster when an
 	// applicable Pod is denied because of an operator problem. It never carries
 	// Secret values. Default: no events.
 	Recorder record.EventRecorder
@@ -132,7 +132,7 @@ func (m *PodMutator) SetupWithManager(mgr ctrl.Manager) error {
 	return nil
 }
 
-// SetupWithManager registers the SimulationEnvironment validator at
+// SetupWithManager registers the VcrGpuCluster validator at
 // EnvironmentValidatorPath.
 func (v *EnvironmentValidator) SetupWithManager(mgr ctrl.Manager) error {
 	mgr.GetWebhookServer().Register(EnvironmentValidatorPath, &crwebhook.Admission{Handler: v})

@@ -45,35 +45,35 @@ func workloadFailure(format string, args ...any) *admissionDenial {
 	return &admissionDenial{detail: fmt.Sprintf(format, args...)}
 }
 
-// environment reads the singleton SimulationEnvironment admission works against.
+// environment reads the singleton VcrGpuCluster admission works against.
 //
 // A missing, unready, or empty-catalog environment is an operator problem: the
 // workload may be perfectly valid, so the denial says so.
-func (m *PodMutator) environment(ctx context.Context) (*vcrv1alpha1.SimulationEnvironment, *admissionDenial) {
-	env := &vcrv1alpha1.SimulationEnvironment{}
-	key := types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}
+func (m *PodMutator) environment(ctx context.Context) (*vcrv1alpha1.VcrGpuCluster, *admissionDenial) {
+	env := &vcrv1alpha1.VcrGpuCluster{}
+	key := types.NamespacedName{Name: vcrv1alpha1.VcrGpuClusterNameDefault}
 	if err := m.client.Get(ctx, key, env); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, operatorFailure(
-				"no SimulationEnvironment named %q exists: create the cluster-scoped SimulationEnvironment before submitting GPU workloads",
+				"no VcrGpuCluster named %q exists: create the cluster-scoped VcrGpuCluster before submitting GPU workloads",
 				key.Name)
 		}
-		return nil, operatorFailure("the SimulationEnvironment %q cannot be read: %v", key.Name, err)
+		return nil, operatorFailure("the VcrGpuCluster %q cannot be read: %v", key.Name, err)
 	}
 
 	ready := meta.FindStatusCondition(env.Status.Conditions, vcrv1alpha1.ConditionReady)
 	switch {
 	case ready == nil:
 		return nil, operatorFailure(
-			"the SimulationEnvironment %q publishes no %s condition: reconciliation has not completed",
+			"the VcrGpuCluster %q publishes no %s condition: reconciliation has not completed",
 			env.Name, vcrv1alpha1.ConditionReady)
 	case ready.Status != metav1.ConditionTrue:
 		return nil, operatorFailure(
-			"the SimulationEnvironment %q is not ready (%s): %s",
+			"the VcrGpuCluster %q is not ready (%s): %s",
 			env.Name, ready.Reason, ready.Message)
 	case len(env.Status.Profiles) == 0:
 		return nil, operatorFailure(
-			"the SimulationEnvironment %q publishes no reconciled profile: spec.profiles must reference a profile image before GPU workloads can be admitted",
+			"the VcrGpuCluster %q publishes no reconciled profile: spec.profiles must reference a profile image before GPU workloads can be admitted",
 			env.Name)
 	}
 	return env, nil
@@ -85,7 +85,7 @@ func (m *PodMutator) environment(ctx context.Context) (*vcrv1alpha1.SimulationEn
 // and metadata were resolved during reconciliation and are reused verbatim. An
 // entry that cannot be parsed keeps its place as a rejected candidate so that a
 // selection failure explains what was considered.
-func catalogFor(env *vcrv1alpha1.SimulationEnvironment) (*profile.Catalog, error) {
+func catalogFor(env *vcrv1alpha1.VcrGpuCluster) (*profile.Catalog, error) {
 	candidates := make([]profile.Candidate, 0, len(env.Status.Profiles))
 	for _, published := range env.Status.Profiles {
 		candidate := profile.Candidate{
@@ -115,7 +115,7 @@ func catalogFor(env *vcrv1alpha1.SimulationEnvironment) (*profile.Catalog, error
 //
 // The provisioner needs no sizing of its own when the environment omits it: the
 // profile export is a short copy job, and spec.runtime.provisioner is optional.
-func translatorEnvironment(env *vcrv1alpha1.SimulationEnvironment, images translator.Images) translator.Environment {
+func translatorEnvironment(env *vcrv1alpha1.VcrGpuCluster, images translator.Images) translator.Environment {
 	sizing := plan.Resources{
 		Frontend: env.Spec.Runtime.Frontend,
 		Backend:  env.Spec.Runtime.Backend,
@@ -164,7 +164,7 @@ func volumeMap(pod *corev1.Pod) map[string]corev1.Volume {
 // the admission log.
 //
 // The recorder is optional, and the message never contains Secret material.
-func (m *PodMutator) recordOperatorProblem(env *vcrv1alpha1.SimulationEnvironment, log logr.Logger, detail string) {
+func (m *PodMutator) recordOperatorProblem(env *vcrv1alpha1.VcrGpuCluster, log logr.Logger, detail string) {
 	name := ""
 	if env != nil {
 		name = env.Name

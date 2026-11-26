@@ -103,8 +103,8 @@ if [[ "$delete" == true ]]; then
   echo "removing webhook registrations (so Pod creation stops depending on the operator)"
   "${kube[@]}" delete mutatingwebhookconfiguration vllm-vcr-operator-mutating-webhook --ignore-not-found
   "${kube[@]}" delete validatingwebhookconfiguration vllm-vcr-operator-validating-webhook --ignore-not-found
-  echo "removing SimulationEnvironment custom resource definition"
-  "${kube[@]}" delete crd simulationenvironments.vcr.opendatahub-io --ignore-not-found
+  echo "removing VcrGpuCluster custom resource definition"
+  "${kube[@]}" delete crd vcrgpuclusters.vcr.opendatahub-io --ignore-not-found
   if [[ "$skip_scc" == false ]] && command -v oc >/dev/null; then
     oc adm policy remove-scc-from-user "$scc" -z "$device_plugin_sa" -n "$namespace" >/dev/null 2>&1 || true
   fi
@@ -293,8 +293,8 @@ echo
 echo "installed. next steps:"
 echo "  1. label the nodes that should advertise synthetic GPUs, matching the environment:"
 echo "       kubectl label node <node> vcr.opendatahub-io/simulation=true"
-echo "  2. apply a SimulationEnvironment:"
+echo "  2. apply a VcrGpuCluster:"
 echo "       kubectl apply -f test/fixtures/environments/h200.yaml"
 echo "  3. check reconciliation:"
-echo "       kubectl get simulationenvironment default -o yaml"
+echo "       kubectl get vcrgpucluster default -o yaml"
 echo "       kubectl -n $namespace get daemonset,pods"

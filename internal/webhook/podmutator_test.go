@@ -73,10 +73,10 @@ func TestApplicablePodDeniedWithoutEnvironment(t *testing.T) {
 	resp := mutator.Admit(t.Context(), admissionRequest(t, admissionv1.Create, testPod()))
 
 	if resp.Allowed {
-		t.Fatal("GPU Pod admitted without a SimulationEnvironment")
+		t.Fatal("GPU Pod admitted without a VcrGpuCluster")
 	}
 	message := messageOf(resp)
-	for _, want := range []string{"SimulationEnvironment", vcrv1alpha1.SimulationEnvironmentNameDefault} {
+	for _, want := range []string{"VcrGpuCluster", vcrv1alpha1.VcrGpuClusterNameDefault} {
 		if !strings.Contains(message, want) {
 			t.Errorf("denial message %q does not mention %q", message, want)
 		}
@@ -86,7 +86,7 @@ func TestApplicablePodDeniedWithoutEnvironment(t *testing.T) {
 // TestApplicablePodDeniedWhenEnvironmentIsNotReady asserts a not-ready
 // environment fails closed and reports its own condition message.
 func TestApplicablePodDeniedWhenEnvironmentIsNotReady(t *testing.T) {
-	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	env := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Status.Conditions = []metav1.Condition{{
 			Type:    vcrv1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
@@ -99,7 +99,7 @@ func TestApplicablePodDeniedWhenEnvironmentIsNotReady(t *testing.T) {
 	resp := mutator.Admit(t.Context(), admissionRequest(t, admissionv1.Create, testPod()))
 
 	if resp.Allowed {
-		t.Fatal("GPU Pod admitted by a not-ready SimulationEnvironment")
+		t.Fatal("GPU Pod admitted by a not-ready VcrGpuCluster")
 	}
 	message := messageOf(resp)
 	if !strings.Contains(message, "not ready") && !strings.Contains(message, "not Ready") {
@@ -113,7 +113,7 @@ func TestApplicablePodDeniedWhenEnvironmentIsNotReady(t *testing.T) {
 // TestApplicablePodDeniedWithoutReconciledProfiles asserts an environment that is
 // ready but publishes no profile cannot admit anything.
 func TestApplicablePodDeniedWithoutReconciledProfiles(t *testing.T) {
-	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	env := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		e.Status.Profiles = nil
 		e.Spec.Profiles = nil
 	})

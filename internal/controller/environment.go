@@ -30,7 +30,7 @@ import (
 // change, so they are retried with backoff.
 const DefaultRetryInterval = 30 * time.Second
 
-// Options configures a SimulationEnvironmentReconciler.
+// Options configures a VcrGpuClusterReconciler.
 type Options struct {
 	// Client reads and writes the environment, the device plugin resources, and
 	// Nodes. It is the manager's cached client in the operator binary.
@@ -65,14 +65,14 @@ type Options struct {
 // profile image.
 type ResolverFactory func(registry.Options) registry.Resolver
 
-// SimulationEnvironmentReconciler reconciles the singleton SimulationEnvironment:
+// VcrGpuClusterReconciler reconciles the singleton VcrGpuCluster:
 // the published profile catalog, the environment conditions, and the synthetic
 // device-plugin DaemonSet.
 //
 // It never mutates Pods. Admission pins the digest published here on each
 // admitted Pod, so changing a profile cannot retrofit a running simulation:
 // restarting the workload applies a new profile.
-type SimulationEnvironmentReconciler struct {
+type VcrGpuClusterReconciler struct {
 	client.Client
 
 	// OperatorNamespace holds the operator-owned Secrets, the device plugin
@@ -95,9 +95,9 @@ type SimulationEnvironmentReconciler struct {
 	Recorder record.EventRecorder
 }
 
-// NewSimulationEnvironmentReconciler builds the reconciler from opts and
+// NewVcrGpuClusterReconciler builds the reconciler from opts and
 // validates the settings that cannot be defaulted.
-func NewSimulationEnvironmentReconciler(opts Options) (*SimulationEnvironmentReconciler, error) {
+func NewVcrGpuClusterReconciler(opts Options) (*VcrGpuClusterReconciler, error) {
 	switch {
 	case opts.Client == nil:
 		return nil, fmt.Errorf("simulation environment reconciler: a client is required")
@@ -122,7 +122,7 @@ func NewSimulationEnvironmentReconciler(opts Options) (*SimulationEnvironmentRec
 		retryInterval = DefaultRetryInterval
 	}
 
-	reconciler := &SimulationEnvironmentReconciler{
+	reconciler := &VcrGpuClusterReconciler{
 		Client:            opts.Client,
 		OperatorNamespace: opts.OperatorNamespace,
 		NewResolver:       newResolver,
@@ -141,12 +141,12 @@ func NewSimulationEnvironmentReconciler(opts Options) (*SimulationEnvironmentRec
 // SetupWithManager registers the reconciler with the manager. The operator-owned
 // DaemonSet and device count ConfigMap are watched through their owner reference,
 // so a deleted or progressing device plugin is reconciled without polling.
-func (r *SimulationEnvironmentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *VcrGpuClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&vcrv1alpha1.SimulationEnvironment{}).
+		For(&vcrv1alpha1.VcrGpuCluster{}).
 		Owns(&appsv1.DaemonSet{}).
 		Owns(&corev1.ConfigMap{}).
-		Named("simulationenvironment").
+		Named("vcrgpucluster").
 		Complete(r)
 }
 
@@ -155,28 +155,28 @@ func (r *SimulationEnvironmentReconciler) SetupWithManager(mgr ctrl.Manager) err
 // The operator reads the singleton configuration and publishes the reconciled
 // catalog in its status. Pull Secrets are read in the operator namespace only,
 // and their values never reach status, conditions, or events.
-func (r *SimulationEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	env := &vcrv1alpha1.SimulationEnvironment{}
+func (r *VcrGpuClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	env := &vcrv1alpha1.VcrGpuCluster{}
 	if err := r.Get(ctx, req.NamespacedName, env); err != nil {
 		if apierrors.IsNotFound(err) {
 			// The device plugin DaemonSet and the device count ConfigMap are owned
 			// by the environment, so Kubernetes garbage collects them.
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, fmt.Errorf("get SimulationEnvironment %s: %w", req.NamespacedName, err)
+		return ctrl.Result{}, fmt.Errorf("get VcrGpuCluster %s: %w", req.NamespacedName, err)
 	}
 	return r.reconcileEnvironment(ctx, env)
 }
 
 // reconcileEnvironment reconciles one environment and publishes its status.
-func (r *SimulationEnvironmentReconciler) reconcileEnvironment(ctx context.Context, env *vcrv1alpha1.SimulationEnvironment) (ctrl.Result, error) {
-	if env.Name != vcrv1alpha1.SimulationEnvironmentNameDefault {
+func (r *VcrGpuClusterReconciler) reconcileEnvironment(ctx context.Context, env *vcrv1alpha1.VcrGpuCluster) (ctrl.Result, error) {
+	if env.Name != vcrv1alpha1.VcrGpuClusterNameDefault {
 		// The CRD's CEL rule already rejects any other name. Reaching this point
 		// means the rule was bypassed, so fail loudly instead of reconciling a
 		// second device plugin that would fight over the same extended resource.
 		return ctrl.Result{}, fmt.Errorf(
-			"SimulationEnvironment %q is not supported: the only accepted name is %q",
-			env.Name, vcrv1alpha1.SimulationEnvironmentNameDefault)
+			"VcrGpuCluster %q is not supported: the only accepted name is %q",
+			env.Name, vcrv1alpha1.VcrGpuClusterNameDefault)
 	}
 
 	profiles := r.reconcileProfiles(ctx, env)
@@ -209,15 +209,15 @@ func (r *SimulationEnvironmentReconciler) reconcileEnvironment(ctx context.Conte
 // version the API server holds: the conditions carry the transition times of
 // unchanged conditions and ObservedGeneration carries the current generation. Only
 // a spent retry budget is handed back to the caller to requeue.
-func (r *SimulationEnvironmentReconciler) publishStatus(
+func (r *VcrGpuClusterReconciler) publishStatus(
 	ctx context.Context,
-	env *vcrv1alpha1.SimulationEnvironment,
+	env *vcrv1alpha1.VcrGpuCluster,
 	profiles profileReconciliation,
 	devicePlugin DevicePluginState,
 ) error {
 	key := client.ObjectKeyFromObject(env)
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		current := &vcrv1alpha1.SimulationEnvironment{}
+		current := &vcrv1alpha1.VcrGpuCluster{}
 		if err := r.Get(ctx, key, current); err != nil {
 			if apierrors.IsNotFound(err) {
 				// The environment was deleted while it was being published. There is
@@ -225,7 +225,7 @@ func (r *SimulationEnvironmentReconciler) publishStatus(
 				// through the owner reference.
 				return nil
 			}
-			return fmt.Errorf("get SimulationEnvironment %s to publish its status: %w", env.Name, err)
+			return fmt.Errorf("get VcrGpuCluster %s to publish its status: %w", env.Name, err)
 		}
 
 		desired := r.desiredStatus(current, profiles, devicePlugin)
@@ -244,18 +244,18 @@ func (r *SimulationEnvironmentReconciler) publishStatus(
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("update SimulationEnvironment %s status: %w", env.Name, err)
+		return fmt.Errorf("update VcrGpuCluster %s status: %w", env.Name, err)
 	}
 	return nil
 }
 
 // desiredStatus builds the status the reconciler publishes for env.
-func (r *SimulationEnvironmentReconciler) desiredStatus(
-	env *vcrv1alpha1.SimulationEnvironment,
+func (r *VcrGpuClusterReconciler) desiredStatus(
+	env *vcrv1alpha1.VcrGpuCluster,
 	profiles profileReconciliation,
 	devicePlugin DevicePluginState,
-) vcrv1alpha1.SimulationEnvironmentStatus {
-	status := vcrv1alpha1.SimulationEnvironmentStatus{
+) vcrv1alpha1.VcrGpuClusterStatus {
+	status := vcrv1alpha1.VcrGpuClusterStatus{
 		ObservedGeneration:   env.Generation,
 		SupportedVLLMVersion: names.SupportedVLLMVersion,
 		Profiles:             profiles.published,
@@ -276,7 +276,7 @@ func (r *SimulationEnvironmentReconciler) desiredStatus(
 // first moments after creation and is continuously reported in the
 // DevicePluginReady condition. Event messages are condition messages: they name
 // images and Secrets but never Secret values.
-func (r *SimulationEnvironmentReconciler) recordConditionChanges(env *vcrv1alpha1.SimulationEnvironment, previous vcrv1alpha1.SimulationEnvironmentStatus) {
+func (r *VcrGpuClusterReconciler) recordConditionChanges(env *vcrv1alpha1.VcrGpuCluster, previous vcrv1alpha1.VcrGpuClusterStatus) {
 	if r.Recorder == nil {
 		return
 	}
@@ -295,7 +295,7 @@ func (r *SimulationEnvironmentReconciler) recordConditionChanges(env *vcrv1alpha
 // eligible. Kubernetes semantics say an empty selector matches everything, so the
 // device plugin will run on control-plane nodes too. That is allowed on purpose,
 // but it should be visible rather than inferred.
-func (r *SimulationEnvironmentReconciler) recordOpenNodeSelection(env *vcrv1alpha1.SimulationEnvironment) {
+func (r *VcrGpuClusterReconciler) recordOpenNodeSelection(env *vcrv1alpha1.VcrGpuCluster) {
 	if r.Recorder == nil || len(env.Spec.NodeSelection.NodeSelector) > 0 {
 		return
 	}
@@ -305,7 +305,7 @@ func (r *SimulationEnvironmentReconciler) recordOpenNodeSelection(env *vcrv1alph
 
 // setCondition applies one condition to status, preserving the transition time of
 // an unchanged condition.
-func setCondition(status *vcrv1alpha1.SimulationEnvironmentStatus, conditionType string, condition metav1.Condition) {
+func setCondition(status *vcrv1alpha1.VcrGpuClusterStatus, conditionType string, condition metav1.Condition) {
 	condition.Type = conditionType
 	condition.ObservedGeneration = status.ObservedGeneration
 	meta.SetStatusCondition(&status.Conditions, condition)

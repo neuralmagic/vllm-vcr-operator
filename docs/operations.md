@@ -21,7 +21,7 @@ rejected), [`docs/limitations.md`](limitations.md) (what cannot be claimed).
 - cert-manager, or a pre-created webhook serving certificate Secret.
 
 Cluster scope: the operator namespace is `vllm-vcr-operator-system`, the
-`SimulationEnvironment` is cluster scoped, and the admission webhook is
+`VcrGpuCluster` is cluster scoped, and the admission webhook is
 cluster scoped. Workloads may live in any namespace except the operator's own
 (the mutating registration excludes it, so the operator's Pods are never
 translated).
@@ -45,7 +45,7 @@ Verify the install:
 
 ```bash
 kubectl -n vllm-vcr-operator-system rollout status deploy/vllm-vcr-operator-controller-manager
-kubectl get crd simulationenvironments.vcr.opendatahub-io \
+kubectl get crd vcrgpuclusters.vcr.opendatahub-io \
   -o jsonpath='{.status.conditions[?(@.type=="Established")].status}{"\n"}'
 kubectl get mutatingwebhookconfiguration vllm-vcr-operator-mutating-webhook \
   validatingwebhookconfiguration vllm-vcr-operator-validating-webhook
@@ -56,12 +56,12 @@ kubectl get mutatingwebhookconfiguration vllm-vcr-operator-mutating-webhook \
 
 ## Configure
 
-One cluster-scoped `SimulationEnvironment` named `default`; any other name is
+One cluster-scoped `VcrGpuCluster` named `default`; any other name is
 rejected by the CRD's CEL rule.
 
 ```bash
 kubectl apply -f test/fixtures/environments/h200.yaml   # or -k config/samples
-kubectl get sime default -o yaml
+kubectl get vgc default -o yaml
 ```
 
 | Field | Effect |
@@ -197,7 +197,7 @@ Read the environment first: its conditions explain whether admission has anythin
 to select from.
 
 ```bash
-kubectl get sime default -o jsonpath='{range .status.conditions[*]}{.type}{"="}{.status}{" ("}{.reason}{") "}{.message}{"\n"}{end}'
+kubectl get vgc default -o jsonpath='{range .status.conditions[*]}{.type}{"="}{.status}{" ("}{.reason}{") "}{.message}{"\n"}{end}'
 ```
 
 | Condition | Reason | Meaning |
@@ -263,13 +263,13 @@ $ hack/kind-up.sh --delete            # after the run
 
 ```bash
 kubectl -n <ns> delete deploy,po -l llm-d.ai/guide=precise-prefix-cache-routing
-kubectl delete sime default            # removes the device-plugin DaemonSet and its ConfigMap (owner references)
+kubectl delete vgc default            # removes the device-plugin DaemonSet and its ConfigMap (owner references)
 kubectl label node <node> vcr.opendatahub-io/simulation-
 # uninstall the operator itself:
 kustomize build config/default | kubectl delete -f -
 ```
 
-Deleting the `SimulationEnvironment` deletes the operator-owned DaemonSet and its
+Deleting the `VcrGpuCluster` deletes the operator-owned DaemonSet and its
 ConfigMap through owner references; kubelet stops advertising `nvidia.com/gpu`
 once the plugin unregisters.
 

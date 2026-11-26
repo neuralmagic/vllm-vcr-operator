@@ -266,12 +266,12 @@ func (h *harness) startManager(ctx context.Context) error {
 	}
 	h.cachedClient = mgr.GetClient()
 
-	environmentReconciler, err := controller.NewSimulationEnvironmentReconciler(controller.Options{
+	environmentReconciler, err := controller.NewVcrGpuClusterReconciler(controller.Options{
 		Client:            mgr.GetClient(),
 		OperatorNamespace: operatorNamespace,
 		DevicePluginImage: devicePluginImage,
 		NewResolver:       h.registry.factory,
-		Recorder:          mgr.GetEventRecorderFor("simulationenvironment"),
+		Recorder:          mgr.GetEventRecorderFor("vcrgpucluster"),
 	})
 	if err != nil {
 		return fmt.Errorf("create the simulation environment reconciler: %w", err)
@@ -388,13 +388,13 @@ func (h *harness) createBaselineEnvironment(ctx context.Context) error {
 	return h.client.Create(ctx, env)
 }
 
-// baselineEnvironment is the singleton SimulationEnvironment configured the way
+// baselineEnvironment is the singleton VcrGpuCluster configured the way
 // test/fixtures/environments/h200.yaml documents it, with the fake registry's
 // profile image.
-func baselineEnvironment() *vcrv1alpha1.SimulationEnvironment {
-	return &vcrv1alpha1.SimulationEnvironment{
-		ObjectMeta: metav1.ObjectMeta{Name: vcrv1alpha1.SimulationEnvironmentNameDefault},
-		Spec: vcrv1alpha1.SimulationEnvironmentSpec{
+func baselineEnvironment() *vcrv1alpha1.VcrGpuCluster {
+	return &vcrv1alpha1.VcrGpuCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: vcrv1alpha1.VcrGpuClusterNameDefault},
+		Spec: vcrv1alpha1.VcrGpuClusterSpec{
 			NodeSelection: vcrv1alpha1.NodeSelection{
 				NodeSelector: map[string]string{simulationNodeLabel: "true"},
 				Tolerations: []corev1.Toleration{{
@@ -444,12 +444,12 @@ func baselineEnvironment() *vcrv1alpha1.SimulationEnvironment {
 }
 
 // getEnvironment reads the singleton configuration from the direct client.
-func (h *harness) getEnvironment(t *testing.T) *vcrv1alpha1.SimulationEnvironment {
+func (h *harness) getEnvironment(t *testing.T) *vcrv1alpha1.VcrGpuCluster {
 	t.Helper()
-	env := &vcrv1alpha1.SimulationEnvironment{}
-	key := types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}
+	env := &vcrv1alpha1.VcrGpuCluster{}
+	key := types.NamespacedName{Name: vcrv1alpha1.VcrGpuClusterNameDefault}
 	if err := h.client.Get(helperContext(t), key, env); err != nil {
-		t.Fatalf("get SimulationEnvironment %s: %v", key, err)
+		t.Fatalf("get VcrGpuCluster %s: %v", key, err)
 	}
 	return env
 }
@@ -475,7 +475,7 @@ func (h *harness) updateProfiles(t *testing.T, sources ...vcrv1alpha1.ProfileSou
 	env := h.getEnvironment(t)
 	env.Spec.Profiles = sources
 	if err := h.client.Update(helperContext(t), env); err != nil {
-		t.Fatalf("update SimulationEnvironment profiles: %v", err)
+		t.Fatalf("update VcrGpuCluster profiles: %v", err)
 	}
 }
 
@@ -484,8 +484,8 @@ func (h *harness) waitForProfiles(t *testing.T, image string) vcrv1alpha1.Resolv
 	t.Helper()
 	var entry vcrv1alpha1.ResolvedProfile
 	h.poll(t, "a published status.profiles entry for "+image, func() (bool, error) {
-		env := &vcrv1alpha1.SimulationEnvironment{}
-		key := types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}
+		env := &vcrv1alpha1.VcrGpuCluster{}
+		key := types.NamespacedName{Name: vcrv1alpha1.VcrGpuClusterNameDefault}
 		if err := h.client.Get(helperContext(t), key, env); err != nil {
 			return false, err
 		}
@@ -537,13 +537,13 @@ func (h *harness) setDevicePluginReady(t *testing.T, nodes int32) {
 
 // requireReadyEnvironment drives the shared environment to Ready and waits for
 // the manager's cache to observe it, so admission cannot race the status write.
-func (h *harness) requireReadyEnvironment(t *testing.T) *vcrv1alpha1.SimulationEnvironment {
+func (h *harness) requireReadyEnvironment(t *testing.T) *vcrv1alpha1.VcrGpuCluster {
 	t.Helper()
 	h.setDevicePluginReady(t, 1)
 	h.waitForCondition(t, vcrv1alpha1.ConditionReady, metav1.ConditionTrue)
-	h.poll(t, "the manager cache to observe a ready SimulationEnvironment", func() (bool, error) {
-		env := &vcrv1alpha1.SimulationEnvironment{}
-		key := types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}
+	h.poll(t, "the manager cache to observe a ready VcrGpuCluster", func() (bool, error) {
+		env := &vcrv1alpha1.VcrGpuCluster{}
+		key := types.NamespacedName{Name: vcrv1alpha1.VcrGpuClusterNameDefault}
 		if err := h.cachedClient.Get(helperContext(t), key, env); err != nil {
 			return false, err
 		}
@@ -554,7 +554,7 @@ func (h *harness) requireReadyEnvironment(t *testing.T) *vcrv1alpha1.SimulationE
 }
 
 // condition returns a published condition, or nil.
-func condition(env *vcrv1alpha1.SimulationEnvironment, conditionType string) *metav1.Condition {
+func condition(env *vcrv1alpha1.VcrGpuCluster, conditionType string) *metav1.Condition {
 	return meta.FindStatusCondition(env.Status.Conditions, conditionType)
 }
 
@@ -563,8 +563,8 @@ func (h *harness) waitForCondition(t *testing.T, conditionType string, status me
 	t.Helper()
 	var found metav1.Condition
 	h.poll(t, fmt.Sprintf("condition %s=%s", conditionType, status), func() (bool, error) {
-		env := &vcrv1alpha1.SimulationEnvironment{}
-		key := types.NamespacedName{Name: vcrv1alpha1.SimulationEnvironmentNameDefault}
+		env := &vcrv1alpha1.VcrGpuCluster{}
+		key := types.NamespacedName{Name: vcrv1alpha1.VcrGpuClusterNameDefault}
 		if err := h.client.Get(helperContext(t), key, env); err != nil {
 			return false, err
 		}

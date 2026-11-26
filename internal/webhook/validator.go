@@ -17,7 +17,7 @@ import (
 // a capacity reduction can leave admitted Pods unschedulable.
 const AllowCapacityReductionAnnotation = names.AnnotationPrefix + "allow-capacity-reduction"
 
-// EnvironmentValidator validates SimulationEnvironment writes.
+// EnvironmentValidator validates VcrGpuCluster writes.
 //
 // The CRD enforces the singleton name through a CEL rule. This webhook exists for
 // defense in depth and for the transition rules CEL cannot express; everything
@@ -35,7 +35,7 @@ func (v *EnvironmentValidator) Handle(ctx context.Context, req admission.Request
 	return admission.Response{AdmissionResponse: *v.Validate(ctx, &req.AdmissionRequest)}
 }
 
-// Validate returns the validation decision for one SimulationEnvironment write.
+// Validate returns the validation decision for one VcrGpuCluster write.
 //
 // It is exported so tests and the handler share exactly one code path.
 func (v *EnvironmentValidator) Validate(_ context.Context, req *admissionv1.AdmissionRequest) *admissionv1.AdmissionResponse {
@@ -53,24 +53,24 @@ func (v *EnvironmentValidator) Validate(_ context.Context, req *admissionv1.Admi
 		return allowed()
 	}
 
-	next := &vcrv1alpha1.SimulationEnvironment{}
-	if err := decodeObject(req.Object.Raw, next, "SimulationEnvironment"); err != nil {
+	next := &vcrv1alpha1.VcrGpuCluster{}
+	if err := decodeObject(req.Object.Raw, next, "VcrGpuCluster"); err != nil {
 		return denied(err.Error())
 	}
-	if next.Name != vcrv1alpha1.SimulationEnvironmentNameDefault {
+	if next.Name != vcrv1alpha1.VcrGpuClusterNameDefault {
 		return denied(fmt.Sprintf(
-			"name %q is not accepted: a SimulationEnvironment is a singleton cluster configuration and must be named %q",
-			next.Name, vcrv1alpha1.SimulationEnvironmentNameDefault))
+			"name %q is not accepted: a VcrGpuCluster is a singleton cluster configuration and must be named %q",
+			next.Name, vcrv1alpha1.VcrGpuClusterNameDefault))
 	}
 	if req.Operation != admissionv1.Update {
 		return allowed()
 	}
 
-	previous := &vcrv1alpha1.SimulationEnvironment{}
-	if err := decodeObject(req.OldObject.Raw, previous, "SimulationEnvironment"); err != nil {
+	previous := &vcrv1alpha1.VcrGpuCluster{}
+	if err := decodeObject(req.OldObject.Raw, previous, "VcrGpuCluster"); err != nil {
 		// Without the previous version no transition rule can be established, and
 		// admitting on a guess would defeat the validator.
-		return denied(fmt.Sprintf("the previous SimulationEnvironment cannot be read, so the update cannot be validated: %v", err))
+		return denied(fmt.Sprintf("the previous VcrGpuCluster cannot be read, so the update cannot be validated: %v", err))
 	}
 
 	if violations := transitionViolations(previous, next); len(violations) > 0 {
@@ -82,7 +82,7 @@ func (v *EnvironmentValidator) Validate(_ context.Context, req *admissionv1.Admi
 // transitionViolations reports the documented rules an update breaks.
 //
 // Order is stable so the message is deterministic.
-func transitionViolations(previous, next *vcrv1alpha1.SimulationEnvironment) []string {
+func transitionViolations(previous, next *vcrv1alpha1.VcrGpuCluster) []string {
 	var violations []string
 
 	removed := removedProfiles(previous, next)
@@ -115,7 +115,7 @@ func transitionViolations(previous, next *vcrv1alpha1.SimulationEnvironment) []s
 
 // removedProfiles lists the configured profile images the update drops, in spec
 // order of the previous object.
-func removedProfiles(previous, next *vcrv1alpha1.SimulationEnvironment) []string {
+func removedProfiles(previous, next *vcrv1alpha1.VcrGpuCluster) []string {
 	kept := make(map[string]struct{}, len(next.Spec.Profiles))
 	for _, source := range next.Spec.Profiles {
 		kept[source.Image] = struct{}{}

@@ -123,7 +123,7 @@ func TestNewPodMutatorRequiresWiring(t *testing.T) {
 // TestOperatorProblemIsEvented asserts an operator-caused denial is visible on the
 // environment, so a user does not have to infer it from rejected Pods.
 func TestOperatorProblemIsEvented(t *testing.T) {
-	env := testEnvironment(t, func(e *vcrv1alpha1.SimulationEnvironment) {
+	env := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
 		conflicting := resolvedProfile(t, testMetadata())
 		conflicting.Digest = "sha256:ffffffffffffffff"
 		e.Status.Profiles = append(e.Status.Profiles, conflicting)

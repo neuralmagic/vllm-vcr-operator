@@ -1,7 +1,7 @@
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=simulationenvironments,verbs=get;list;watch
-// +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=simulationenvironments/status,verbs=get
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuclusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuclusters/status,verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Package webhook implements the operator's admission webhooks and pull-secret
@@ -11,8 +11,8 @@
 // are the contract between this package and those manifests:
 //
 //	PodMutatorPath           "/mutate-v1-pod" (mutating, Pods, CREATE)
-//	EnvironmentValidatorPath  "/validate-vcr-opendatahub-io-v1alpha1-simulationenvironment"
-//	                          (validating, SimulationEnvironments, CREATE/UPDATE)
+//	EnvironmentValidatorPath  "/validate-vcr-opendatahub-io-v1alpha1-vcrgpucluster"
+//	                          (validating, VcrGpuClusters, CREATE/UPDATE)
 //
 // Use SetupWithManager (or the two per-handler SetupWithManager methods) to
 // register them on a manager's webhook server.
@@ -27,7 +27,7 @@
 // with an empty patch.
 //
 // Admission never re-derives a policy decision: it resolves the singleton
-// SimulationEnvironment, builds the reconciled profile catalog from its published
+// VcrGpuCluster, builds the reconciled profile catalog from its published
 // status, resolves the workload's own invocation with internal/vllm, and reports
 // what internal/translator decided. A structured translator/vllm rejection is a
 // workload problem and the denial names the setting and reason; a failure to read

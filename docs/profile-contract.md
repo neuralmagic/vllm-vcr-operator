@@ -158,14 +158,14 @@ go test ./internal/profile/...
 go run ./cmd/profileexport --source path/to/image-filesystem /tmp/exported
 # A configured profile in a cluster (metadata label + digest resolution):
 kubectl apply -f test/fixtures/environments/h200.yaml
-kubectl get sime default -o jsonpath='{range .status.profiles[*]}{.image}{" "}{.digest}{" "}{.message}{"\n"}{end}'
+kubectl get vgc default -o jsonpath='{range .status.profiles[*]}{.image}{" "}{.digest}{" "}{.message}{"\n"}{end}'
 ```
 
 ## Publish and reference
 
 ```yaml
 apiVersion: vcr.opendatahub-io/v1alpha1
-kind: SimulationEnvironment
+kind: VcrGpuCluster
 metadata:
   name: default
 spec:

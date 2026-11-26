@@ -102,7 +102,7 @@ start when provisioning fails.
 
 - `schemaVersion` must be exactly `vcr.opendatahub-io/profile/v1`. Unknown
   versions are unusable, not best-effort parsed.
-- `gpu.type` is the simulated accelerator supplied by `SimulationEnvironment`
+- `gpu.type` is the simulated accelerator supplied by `VcrGpuCluster`
   (`spec.gpuType`), not a value inferred from device count.
 - `gpu.count` states how many synthetic devices the recorded topology implies.
   A workload requesting 2 devices requires a profile whose `gpu.count` is 2 and

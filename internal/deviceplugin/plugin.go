@@ -52,7 +52,7 @@ const (
 	ReadyPath = "/readyz"
 
 	// minDeviceCount and maxDeviceCount bound the advertised count. The upper
-	// bound matches the SimulationEnvironment API limit.
+	// bound matches the VcrGpuCluster API limit.
 	minDeviceCount = 1
 	maxDeviceCount = 64
 

@@ -103,11 +103,11 @@ func resolvedProfile(t *testing.T, metadata *profile.Metadata) vcrv1alpha1.Resol
 }
 
 // testEnvironment is the reconciled singleton environment.
-func testEnvironment(t *testing.T, mutate ...func(*vcrv1alpha1.SimulationEnvironment)) *vcrv1alpha1.SimulationEnvironment {
+func testEnvironment(t *testing.T, mutate ...func(*vcrv1alpha1.VcrGpuCluster)) *vcrv1alpha1.VcrGpuCluster {
 	t.Helper()
-	env := &vcrv1alpha1.SimulationEnvironment{
-		ObjectMeta: metav1.ObjectMeta{Name: vcrv1alpha1.SimulationEnvironmentNameDefault},
-		Spec: vcrv1alpha1.SimulationEnvironmentSpec{
+	env := &vcrv1alpha1.VcrGpuCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: vcrv1alpha1.VcrGpuClusterNameDefault},
+		Spec: vcrv1alpha1.VcrGpuClusterSpec{
 			NodeSelection: vcrv1alpha1.NodeSelection{
 				NodeSelector: map[string]string{"vcr.opendatahub-io/simulation": "true"},
 				Tolerations: []corev1.Toleration{{
@@ -135,7 +135,7 @@ func testEnvironment(t *testing.T, mutate ...func(*vcrv1alpha1.SimulationEnviron
 			},
 			LogLevel: "info",
 		},
-		Status: vcrv1alpha1.SimulationEnvironmentStatus{
+		Status: vcrv1alpha1.VcrGpuClusterStatus{
 			ObservedGeneration:   1,
 			SupportedVLLMVersion: names.SupportedVLLMVersion,
 			Profiles:             []vcrv1alpha1.ResolvedProfile{resolvedProfile(t, testMetadata())},
@@ -143,7 +143,7 @@ func testEnvironment(t *testing.T, mutate ...func(*vcrv1alpha1.SimulationEnviron
 				Type:    vcrv1alpha1.ConditionReady,
 				Status:  metav1.ConditionTrue,
 				Reason:  vcrv1alpha1.ReasonEnvironmentReady,
-				Message: "SimulationEnvironment is ready",
+				Message: "VcrGpuCluster is ready",
 			}},
 		},
 	}
@@ -248,11 +248,11 @@ func admissionRequest(t *testing.T, operation admissionv1.Operation, object any,
 		req.Namespace = typed.Namespace
 		req.Name = typed.Name
 		req.Kind = metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"}
-	case *vcrv1alpha1.SimulationEnvironment:
+	case *vcrv1alpha1.VcrGpuCluster:
 		req.Name = typed.Name
 		req.Kind = metav1.GroupVersionKind{
 			Group: vcrv1alpha1.GroupVersion.Group, Version: vcrv1alpha1.GroupVersion.Version,
-			Kind: "SimulationEnvironment",
+			Kind: "VcrGpuCluster",
 		}
 	}
 	for _, apply := range mutate {

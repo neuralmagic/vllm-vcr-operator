@@ -86,10 +86,10 @@ type DevicePluginState struct {
 }
 
 // DevicePluginReconciler renders and reconciles the synthetic GPU device-plugin
-// DaemonSet and its device count ConfigMap from a SimulationEnvironment.
+// DaemonSet and its device count ConfigMap from a VcrGpuCluster.
 //
 // Both objects live in OperatorNamespace and are controlled by the cluster-scoped
-// SimulationEnvironment, so deleting the environment deletes them.
+// VcrGpuCluster, so deleting the environment deletes them.
 type DevicePluginReconciler struct {
 	// Client reads and writes the DaemonSet, the ConfigMap, and Nodes.
 	Client client.Client
@@ -109,7 +109,7 @@ type DevicePluginReconciler struct {
 // The DaemonSet and its ConfigMap are operator-owned; Nodes are only read, to
 // report which simulation nodes are excluded because a real GPU provider already
 // advertises nvidia.com/gpu there. The operator never writes node labels.
-func (r *DevicePluginReconciler) Reconcile(ctx context.Context, env *vcrv1alpha1.SimulationEnvironment) (DevicePluginState, error) {
+func (r *DevicePluginReconciler) Reconcile(ctx context.Context, env *vcrv1alpha1.VcrGpuCluster) (DevicePluginState, error) {
 	if r.Image == "" {
 		return DevicePluginState{}, fmt.Errorf(
 			"device plugin image is not configured: set %s to the device-plugin image reference", EnvDevicePluginImage)
@@ -119,7 +119,7 @@ func (r *DevicePluginReconciler) Reconcile(ctx context.Context, env *vcrv1alpha1
 			"operator namespace is not configured: the device plugin DaemonSet and its device count ConfigMap need a namespace")
 	}
 	if env == nil {
-		return DevicePluginState{}, fmt.Errorf("device plugin reconciliation requires a SimulationEnvironment")
+		return DevicePluginState{}, fmt.Errorf("device plugin reconciliation requires a VcrGpuCluster")
 	}
 
 	if err := r.reconcileServiceAccount(ctx, env); err != nil {
@@ -154,7 +154,7 @@ func (r *DevicePluginReconciler) Reconcile(ctx context.Context, env *vcrv1alpha1
 // exists. The DaemonSet runs as this account so a platform can bind the narrowest
 // permission that permits kubelet's socket directory, instead of granting it to
 // every Pod in the operator namespace.
-func (r *DevicePluginReconciler) reconcileServiceAccount(ctx context.Context, env *vcrv1alpha1.SimulationEnvironment) error {
+func (r *DevicePluginReconciler) reconcileServiceAccount(ctx context.Context, env *vcrv1alpha1.VcrGpuCluster) error {
 	desired := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      names.DevicePluginServiceAccount,
@@ -202,7 +202,7 @@ func (r *DevicePluginReconciler) reconcileServiceAccount(ctx context.Context, en
 // reconcileDaemonSet creates the DaemonSet when absent and otherwise merges the
 // operator-managed fields into the existing object, so server-defaulted fields
 // are preserved and an unchanged spec produces no write.
-func (r *DevicePluginReconciler) reconcileDaemonSet(ctx context.Context, env *vcrv1alpha1.SimulationEnvironment) (*appsv1.DaemonSet, error) {
+func (r *DevicePluginReconciler) reconcileDaemonSet(ctx context.Context, env *vcrv1alpha1.VcrGpuCluster) (*appsv1.DaemonSet, error) {
 	desired, err := r.desiredDaemonSet(env)
 	if err != nil {
 		return nil, err
@@ -234,7 +234,7 @@ func (r *DevicePluginReconciler) reconcileDaemonSet(ctx context.Context, env *vc
 }
 
 // desiredDaemonSet renders the DaemonSet for env.
-func (r *DevicePluginReconciler) desiredDaemonSet(env *vcrv1alpha1.SimulationEnvironment) (*appsv1.DaemonSet, error) {
+func (r *DevicePluginReconciler) desiredDaemonSet(env *vcrv1alpha1.VcrGpuCluster) (*appsv1.DaemonSet, error) {
 	labels := devicePluginLabels(env)
 
 	daemonSet := &appsv1.DaemonSet{
@@ -267,7 +267,7 @@ func (r *DevicePluginReconciler) desiredDaemonSet(env *vcrv1alpha1.SimulationEnv
 }
 
 // desiredContainer renders the single device-plugin container.
-func (r *DevicePluginReconciler) desiredContainer(env *vcrv1alpha1.SimulationEnvironment) corev1.Container {
+func (r *DevicePluginReconciler) desiredContainer(env *vcrv1alpha1.VcrGpuCluster) corev1.Container {
 	logLevel := env.Spec.LogLevel
 	if logLevel == "" {
 		logLevel = "info"
@@ -387,7 +387,7 @@ func realGPUProviderExclusion() *corev1.Affinity {
 }
 
 // devicePluginSelector is the immutable label selector shared by the DaemonSet
-// and its Pods. It must not depend on the SimulationEnvironment name: a
+// and its Pods. It must not depend on the VcrGpuCluster name: a
 // DaemonSet selector cannot be updated in place.
 func devicePluginSelector() map[string]string {
 	return map[string]string{
@@ -397,7 +397,7 @@ func devicePluginSelector() map[string]string {
 }
 
 // devicePluginLabels are the labels put on the DaemonSet and its Pods.
-func devicePluginLabels(env *vcrv1alpha1.SimulationEnvironment) map[string]string {
+func devicePluginLabels(env *vcrv1alpha1.VcrGpuCluster) map[string]string {
 	labels := devicePluginSelector()
 	labels[names.EnvironmentLabel] = env.Name
 	return labels
@@ -406,7 +406,7 @@ func devicePluginLabels(env *vcrv1alpha1.SimulationEnvironment) map[string]strin
 // reconcileDeviceCountConfigMap publishes the device count the plugin polls. The
 // file content is the decimal count, which is what the plugin parses after
 // trimming whitespace.
-func (r *DevicePluginReconciler) reconcileDeviceCountConfigMap(ctx context.Context, env *vcrv1alpha1.SimulationEnvironment) error {
+func (r *DevicePluginReconciler) reconcileDeviceCountConfigMap(ctx context.Context, env *vcrv1alpha1.VcrGpuCluster) error {
 	key := types.NamespacedName{Namespace: r.OperatorNamespace, Name: DevicePluginConfigMapName}
 	existing := &corev1.ConfigMap{}
 	if err := r.Client.Get(ctx, key, existing); err != nil {
@@ -442,7 +442,7 @@ func (r *DevicePluginReconciler) reconcileDeviceCountConfigMap(ctx context.Conte
 // excludedNodes lists the nodes that match the simulation node selector but
 // carry a real GPU provider marker. Listing nodes is read-only: the exclusion
 // itself is enforced by the DaemonSet's node affinity.
-func (r *DevicePluginReconciler) excludedNodes(ctx context.Context, env *vcrv1alpha1.SimulationEnvironment) ([]string, error) {
+func (r *DevicePluginReconciler) excludedNodes(ctx context.Context, env *vcrv1alpha1.VcrGpuCluster) ([]string, error) {
 	nodeList := &corev1.NodeList{}
 	if err := r.Client.List(ctx, nodeList, client.MatchingLabels(env.Spec.NodeSelection.NodeSelector)); err != nil {
 		return nil, fmt.Errorf("list simulation nodes: %w", err)
@@ -461,7 +461,7 @@ func (r *DevicePluginReconciler) excludedNodes(ctx context.Context, env *vcrv1al
 
 // mergeDeviceCountConfigMap writes the operator-managed fields of the device
 // count ConfigMap. The caller compares the object before and after the call.
-func mergeDeviceCountConfigMap(configMap *corev1.ConfigMap, env *vcrv1alpha1.SimulationEnvironment, scheme *runtime.Scheme) error {
+func mergeDeviceCountConfigMap(configMap *corev1.ConfigMap, env *vcrv1alpha1.VcrGpuCluster, scheme *runtime.Scheme) error {
 	if configMap.Data == nil {
 		configMap.Data = map[string]string{}
 	}
@@ -475,11 +475,11 @@ func mergeDeviceCountConfigMap(configMap *corev1.ConfigMap, env *vcrv1alpha1.Sim
 	return setEnvironmentOwner(env, configMap, scheme)
 }
 
-// setEnvironmentOwner makes the cluster-scoped SimulationEnvironment the
+// setEnvironmentOwner makes the cluster-scoped VcrGpuCluster the
 // controller of an operator-managed object so it is garbage collected with the
 // environment. A cluster-scoped owner of a namespaced object is allowed; the
 // reverse is not, and this operator never relies on that.
-func setEnvironmentOwner(env *vcrv1alpha1.SimulationEnvironment, object metav1.Object, scheme *runtime.Scheme) error {
+func setEnvironmentOwner(env *vcrv1alpha1.VcrGpuCluster, object metav1.Object, scheme *runtime.Scheme) error {
 	if err := controllerutil.SetControllerReference(env, object, scheme); err != nil {
 		return fmt.Errorf("set owner reference on %T %s: %w", object, object.GetName(), err)
 	}
@@ -492,7 +492,7 @@ func setEnvironmentOwner(env *vcrv1alpha1.SimulationEnvironment, object metav1.O
 // (dns policy, restart policy, probe defaults, termination message paths, and so
 // on), and replacing the whole template would strip those defaults and make the
 // next comparison differ again. Merging keeps an unchanged spec a no-op.
-func mergeDaemonSet(existing, desired *appsv1.DaemonSet, env *vcrv1alpha1.SimulationEnvironment, scheme *runtime.Scheme) error {
+func mergeDaemonSet(existing, desired *appsv1.DaemonSet, env *vcrv1alpha1.VcrGpuCluster, scheme *runtime.Scheme) error {
 	existing.Labels = mergeStringMap(existing.Labels, desired.Labels)
 	if existing.Spec.Selector == nil {
 		// The selector is immutable, so it is only ever set on creation. A
