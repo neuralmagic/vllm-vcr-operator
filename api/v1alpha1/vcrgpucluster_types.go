@@ -58,13 +58,17 @@ type VcrGpuClusterSpec struct {
 	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._-]*$`
 	GPUType string `json:"gpuType"`
 
-	// ProfileRegistry is the OCI repository profiles are discovered in.
+	// ProfileRegistry is the OCI repository profile references resolve against.
 	//
 	// When it is set, a spec.profiles entry may name a tag or a path inside it —
 	// "qwen3-0.6b-h200-tp1-bf16-0.1.0" or "nested/qwen3-0.6b-h200-tp1-bf16" — and an
 	// absolute reference must live under it: a cluster with one configured registry has
 	// exactly one source of profiles, and a reference elsewhere would carry no
 	// registration at all.
+	//
+	// Nothing is offered implicitly: a profile is usable only once spec.profiles names it.
+	// Discovering the repository's tags automatically was considered and rejected, because
+	// push access to the registry would then decide what every cluster simulates.
 	//
 	// Unset means references are used exactly as written, which is how a cluster whose
 	// images live in several registries is expressed.
