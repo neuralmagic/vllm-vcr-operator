@@ -1,5 +1,6 @@
 // +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuclusters,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuclusters/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuclusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuprofiles,verbs=get;list;watch
 // +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuprofiles/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch

@@ -67,3 +67,30 @@ and a published CPU frontend image for the pinned vLLM release; see
 
 Startup TLS lines ("bad certificate") appear only before `caBundle` is published;
 in steady state both replicas log none and admission succeeds.
+
+## Installing on plain Kubernetes with prebuilt images
+
+`hack/openshift-install.sh` takes image references on the command line and patches the
+manager's `VCR_*_IMAGE` environment variables. `hack/install.sh` does not: it applies a
+kustomize overlay, and the images the operator actually runs come from those environment
+variables, whose defaults are placeholders. An overlay that replaces only the manager image
+leaves the device plugin pulling a nonexistent reference, so `DevicePluginReady` stays false
+and admission rejects every workload. Set all four:
+
+```bash
+kubectl -n <operator-ns> set env deploy/vllm-vcr-operator-controller-manager \
+  VCR_DEVICE_PLUGIN_IMAGE=<plugin> \
+  VCR_FRONTEND_IMAGE=<frontend> \
+  VCR_BACKEND_IMAGE=<simulator>
+```
+
+Webhook certificates: with cert-manager, `cainjector` fills `caBundle` on **every** webhook
+entry. Without it, the CA must be published to every entry as well — the validating
+configuration serves more than one webhook, and an entry with an empty `caBundle` makes the
+API server reject the objects it guards. `hack/install.sh` does this correctly since the
+`VcrGpuProfile` validator was added; older copies patched only `webhooks/0`.
+
+Router sizing: llm-d's chart sizes the EPP **and its Envoy sidecar** for dedicated GPU-server
+nodes (4 CPU / 8Gi each). On small workers, size both down or the router stays `Pending`
+while `helm --wait` reports only "Progress deadline exceeded" — `kubectl describe pod` names
+the real reason.

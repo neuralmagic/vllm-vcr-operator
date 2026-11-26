@@ -139,10 +139,17 @@ if [[ "$use_cert_manager" == false ]]; then
     echo "configurations manually (see config/README.md)" >&2
     exit 1
   fi
+  # Every entry needs the CA: the validating configuration serves more than one
+  # webhook (VcrGpuCluster and VcrGpuProfile), and an entry with an empty caBundle
+  # makes the API server reject the objects it guards.
   for cfg in mutatingwebhookconfiguration/vllm-vcr-operator-mutating-webhook \
     validatingwebhookconfiguration/vllm-vcr-operator-validating-webhook; do
-    kubectl patch "$cfg" --type=json \
-      -p "[{\"op\":\"add\",\"path\":\"/webhooks/0/clientConfig/caBundle\",\"value\":\"$ca\"}]" >/dev/null
+    count=$(kubectl get "$cfg" -o jsonpath='{.webhooks[*].name}' | wc -w)
+    ops=""
+    for ((i = 0; i < count; i++)); do
+      ops+="{\"op\":\"add\",\"path\":\"/webhooks/$i/clientConfig/caBundle\",\"value\":\"$ca\"},"
+    done
+    kubectl patch "$cfg" --type=json -p "[${ops%,}]" >/dev/null
   done
   echo "published caBundle from $secret_ns/$secret"
 fi

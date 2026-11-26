@@ -304,6 +304,10 @@ require_rbac "" nodes get list watch
 require_rbac apps daemonsets get list watch create update patch delete
 require_rbac vcr.opendatahub-io vcrgpuclusters get list watch update patch
 require_rbac vcr.opendatahub-io vcrgpuclusters/status get update patch
+# Owner references from the cluster-scoped VcrGpuCluster onto namespaced objects
+# (device plugin ServiceAccount, DaemonSet) need finalizers access, or the API server
+# refuses blockOwnerDeletion.
+require_rbac vcr.opendatahub-io vcrgpuclusters/finalizers update
 require_rbac vcr.opendatahub-io vcrgpuprofiles get list watch
 require_rbac vcr.opendatahub-io vcrgpuprofiles/status get update patch
 ok "RBAC covers pods, secrets, nodes, daemonsets, vcrgpuclusters and vcrgpuprofiles (+status)"
