@@ -827,3 +827,57 @@ func TestEmptyNodeSelectorSelectsEveryNode(t *testing.T) {
 		}
 	}
 }
+
+// TestProfileRegistryResolvesEntriesInsideIt: with a registry configured, an entry names an
+// identity inside it, so the catalog publishes the full reference and the admission side
+// keeps working with absolute images.
+func TestProfileRegistryResolvesEntriesInsideIt(t *testing.T) {
+	const base = "ghcr.io/acme/vllm-vcr-profiles"
+	env := testEnvironment()
+	env.Spec.ProfileRegistry = base
+	env.Spec.Profiles = []vcrv1alpha1.ProfileSource{{Image: "qwen3-0.6b-h200-tp1-bf16-0.1.0"}}
+
+	digest := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	metadata := contractMetadata(t, "qwen3-0.6b-h200-tp1-bf16", "Qwen/Qwen3-0.6B")
+
+	reg := newFakeRegistry()
+	reg.resolve(base+":qwen3-0.6b-h200-tp1-bf16-0.1.0", digest, metadata)
+	reconciler, c, _ := environmentReconciler(t, reg, env)
+
+	stored, _ := reconcile(t, reconciler, c)
+
+	if len(stored.Status.Profiles) != 1 {
+		t.Fatalf("status.profiles = %+v", stored.Status.Profiles)
+	}
+	want := base + ":qwen3-0.6b-h200-tp1-bf16-0.1.0"
+	if got := stored.Status.Profiles[0].Image; got != want {
+		t.Errorf("published image = %q, want %q", got, want)
+	}
+	if got := stored.Status.Profiles[0].Digest; got != digest {
+		t.Errorf("published digest = %q, want %q", got, digest)
+	}
+	if calls := reg.callCount(); calls != 1 {
+		t.Errorf("registry was called %d times, want the joined reference resolved once", calls)
+	}
+}
+
+// TestProfileRegistryRefusesAnotherRegistry: one configured registry means one source of
+// profiles. An entry naming a different host is reported on the catalog instead of fetched.
+func TestProfileRegistryRefusesAnotherRegistry(t *testing.T) {
+	env := testEnvironment()
+	env.Spec.ProfileRegistry = "ghcr.io/acme/vllm-vcr-profiles"
+	env.Spec.Profiles = []vcrv1alpha1.ProfileSource{{Image: "quay.io/other/profiles:qwen3"}}
+
+	reg := newFakeRegistry()
+	reconciler, c, _ := environmentReconciler(t, reg, env)
+
+	stored, _ := reconcile(t, reconciler, c)
+
+	entry := stored.Status.Profiles[0]
+	if !strings.Contains(entry.Message, "profileRegistry") {
+		t.Fatalf("entry message %q does not explain the refusal", entry.Message)
+	}
+	if len(reg.calls) != 0 {
+		t.Errorf("resolver was called for a reference outside the registry: %v", reg.calls)
+	}
+}

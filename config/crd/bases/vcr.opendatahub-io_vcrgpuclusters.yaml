@@ -100,6 +100,25 @@ spec:
                 description: LogLevel sets the simulator log filter forwarded to the
                   backend.
                 type: string
+              profileRegistry:
+                description: |-
+                  ProfileRegistry is the OCI repository profiles are discovered in.
+
+                  When it is set, a spec.profiles entry may name a tag or a path inside it —
+                  "qwen3-0.6b-h200-tp1-bf16-0.1.0" or "nested/qwen3-0.6b-h200-tp1-bf16" — and an
+                  absolute reference must live under it: a cluster with one configured registry has
+                  exactly one source of profiles, and a reference elsewhere would carry no
+                  registration at all.
+
+                  Unset means references are used exactly as written, which is how a cluster whose
+                  images live in several registries is expressed.
+
+                  It names a repository, not a tag: "ghcr.io/acme/vllm-vcr-profiles", never
+                  "ghcr.io/acme/vllm-vcr-profiles:latest".
+                maxLength: 255
+                minLength: 1
+                pattern: ^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)+$
+                type: string
               profiles:
                 description: |-
                   Profiles lists the recorded profile OCI images available to admission.

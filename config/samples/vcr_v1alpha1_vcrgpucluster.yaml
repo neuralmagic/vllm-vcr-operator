@@ -26,8 +26,14 @@ spec:
   # selected node.
   devicesPerNode: 8
   gpuType: H200
+  # Where profiles come from. With it set, entries below name an identity inside this
+  # repository: "qwen3-0.6b-h200-tp1-bf16" becomes <profileRegistry>:qwen3-0.6b-h200-tp1-bf16,
+  # and a reference to another registry is refused rather than fetched. Leave it unset to
+  # list absolute references from several registries.
+  profileRegistry: quay.io/opendatahub/vllm-vcr-profiles
   profiles:
-    - image: quay.io/opendatahub/vllm-vcr-profiles:qwen3-0.6b-h200-tp1-bf16
+    # A tag inside the registry above; reconciliation pins it to a digest.
+    - image: qwen3-0.6b-h200-tp1-bf16
   # Optional: Secrets in the operator namespace used to pull private profile
   # images. Only the credentials needed by the selected profile are projected
   # into the workload namespace.

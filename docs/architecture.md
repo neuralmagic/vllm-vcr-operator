@@ -19,8 +19,8 @@ network API; only inference execution is simulated.
 Two CRs, with different owners:
 
 - `VcrGpuCluster` (cluster scoped, name `default` only, enforced by a CRD rule) is the
-  platform configuration: synthetic device count, the registered profile images, their
-  reconcilied catalog, and the GPU type being simulated. Its `status.profiles` is the
+  platform configuration: synthetic device count, the registry profiles come from and the
+  entries registered in it, their reconciled catalog, and the GPU type being simulated. Its `status.profiles` is the
   catalog admission selects from; there is no separate `Profile` resource, because a
   catalogue entry only exists as something the cluster offers.
 - `VcrGpuProfile` (namespaced, at most one per namespace) is a workload owner's choice:

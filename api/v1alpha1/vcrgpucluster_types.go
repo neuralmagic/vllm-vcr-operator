@@ -58,6 +58,26 @@ type VcrGpuClusterSpec struct {
 	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._-]*$`
 	GPUType string `json:"gpuType"`
 
+	// ProfileRegistry is the OCI repository profiles are discovered in.
+	//
+	// When it is set, a spec.profiles entry may name a tag or a path inside it —
+	// "qwen3-0.6b-h200-tp1-bf16-0.1.0" or "nested/qwen3-0.6b-h200-tp1-bf16" — and an
+	// absolute reference must live under it: a cluster with one configured registry has
+	// exactly one source of profiles, and a reference elsewhere would carry no
+	// registration at all.
+	//
+	// Unset means references are used exactly as written, which is how a cluster whose
+	// images live in several registries is expressed.
+	//
+	// It names a repository, not a tag: "ghcr.io/acme/vllm-vcr-profiles", never
+	// "ghcr.io/acme/vllm-vcr-profiles:latest".
+	//
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)+$`
+	ProfileRegistry string `json:"profileRegistry,omitempty"`
+
 	// Profiles lists the recorded profile OCI images available to admission.
 	// Metadata is reconciled outside admission from these images; a Pod is
 	// always pinned to the digest resolved at reconciliation time.

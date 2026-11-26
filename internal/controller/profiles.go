@@ -86,6 +86,19 @@ func (r *VcrGpuClusterReconciler) reconcileProfiles(ctx context.Context, env *vc
 	candidates := make([]profile.Candidate, 0, len(env.Spec.Profiles))
 
 	for _, source := range env.Spec.Profiles {
+		// A cluster names one registry; a profile entry names what to look for inside it.
+		reference, err := registry.JoinReference(env.Spec.ProfileRegistry, source.Image)
+		if err != nil {
+			reason := err.Error()
+			result.unusable = append(result.unusable, reason)
+			result.published = append(result.published, unusableProfile(source.Image, "", reason))
+			candidates = append(candidates, profile.Candidate{Image: source.Image, Message: reason})
+			continue
+		}
+		if reference != source.Image {
+			source.Image = reference
+		}
+
 		if _, duplicate := seen[source.Image]; duplicate {
 			// status.profiles is keyed by image, so a duplicate image would be a
 			// duplicate map key. Report it instead of publishing one of them.

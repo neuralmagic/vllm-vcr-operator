@@ -70,7 +70,8 @@ kubectl get vgc default -o yaml
 | `spec.simulationNodes.tolerations` | Applied to the device-plugin DaemonSet, so tainted simulation nodes can run it. |
 | `spec.devicesPerNode` | Synthetic devices advertised per node (1–64). A scheduling quantity: a Pod requesting two devices consumes two, and selects a profile whose recorded topology matches. |
 | `spec.gpuType` | The simulated accelerator. Participates in profile selection, so timing is never inferred from device count alone. |
-| `spec.profiles[].image` | Profile image. A tag is resolved and pinned by digest during reconciliation; admission always pins a digest. |
+| `spec.profileRegistry` | The OCI repository profiles are discovered in, e.g. `ghcr.io/acme/vllm-vcr-profiles`. With it set, a `spec.profiles[].image` may name a tag or path inside it (`qwen3-0.6b-h200-tp1-bf16-0.1.0`, `nested/<id>`), and an absolute reference must live under it — one configured registry means one source of profiles. Unset means references are used exactly as written, which is how images in several registries are expressed. |
+| `spec.profiles[].image` | Profile image or, with `spec.profileRegistry`, an identity inside it. A tag is resolved and pinned by digest during reconciliation; admission always pins a digest. |
 | `spec.profiles[].pullSecretName`, `spec.imagePullSecrets` | Pull credentials in the operator namespace, for private profile images. |
 | `spec.runtime.frontend/backend/provisioner` | Real CPU and memory for the injected containers. Must not request `nvidia.com/gpu`. |
 | `spec.logLevel` | Simulator log filter (`RUST_LOG`). The frontend keeps the workload's own vLLM log level. |
