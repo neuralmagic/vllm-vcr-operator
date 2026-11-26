@@ -70,11 +70,25 @@ kubectl get vgc default -o yaml
 | `spec.simulationNodes.tolerations` | Applied to the device-plugin DaemonSet, so tainted simulation nodes can run it. |
 | `spec.devicesPerNode` | Synthetic devices advertised per node (1–64). A scheduling quantity: a Pod requesting two devices consumes two, and selects a profile whose recorded topology matches. |
 | `spec.gpuType` | The simulated accelerator. Participates in profile selection, so timing is never inferred from device count alone. |
-| `spec.profileRegistry` | The OCI repository profiles are discovered in, e.g. `ghcr.io/acme/vllm-vcr-profiles`. With it set, a `spec.profiles[].image` may name a tag or path inside it (`qwen3-0.6b-h200-tp1-bf16-0.1.0`, `nested/<id>`), and an absolute reference must live under it — one configured registry means one source of profiles. Unset means references are used exactly as written, which is how images in several registries are expressed. |
-| `spec.profiles[].image` | Profile image or, with `spec.profileRegistry`, an identity inside it. A tag is resolved and pinned by digest during reconciliation; admission always pins a digest. |
+| `spec.profileRegistry` | The OCI repository profiles are discovered in, e.g. `ghcr.io/acme/vllm-vcr-profiles`. With `spec.profiles` empty, **every tag in it is offered** (discovery on by default, up to 64 tags; the condition reports anything beyond that). With `spec.profiles` set, discovery is off and only those entries are offered — and each may name a tag or path inside the registry (`qwen3-0.6b-h200-tp1-bf16-0.1.0`, `nested/<id>`), while an absolute reference must live under it. |
+| `spec.profiles[].image` | A profile to offer, and an implicit "no discovery": listing any entry means exactly this set is used. A tag is resolved and pinned by digest during reconciliation; admission always pins a digest. With `spec.profileRegistry` set the entry may be an identity inside it. |
 | `spec.profiles[].pullSecretName`, `spec.imagePullSecrets` | Pull credentials in the operator namespace, for private profile images. |
 | `spec.runtime.frontend/backend/provisioner` | Real CPU and memory for the injected containers. Must not request `nvidia.com/gpu`. |
 | `spec.logLevel` | Simulator log filter (`RUST_LOG`). The frontend keeps the workload's own vLLM log level. |
+
+Which model you get:
+
+| Configuration | Catalog | When a new profile is published upstream |
+| --- | --- | --- |
+| `profileRegistry` set, `profiles` empty | every tag the repository publishes (bounded at 64) | appears within `DiscoveryInterval` (10 min), no edit needed |
+| `profiles` listed | exactly those entries | nothing changes until you list it |
+| neither | empty, and every GPU workload is rejected | — |
+
+Discovery means push access to the profile registry decides what every discovering cluster can
+simulate. Profile images carry a trace and a metadata document — no executable code beyond the
+pinned exporter — but that is still a supply-chain decision: point `profileRegistry` at a
+repository whose push rights you would grant deliberately, and list `profiles` when you need a
+curated, reviewable set.
 
 Reconciliation publishes what admission uses:
 

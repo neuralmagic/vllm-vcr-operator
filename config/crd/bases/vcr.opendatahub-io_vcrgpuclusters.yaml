@@ -113,6 +113,11 @@ spec:
                   Unset means references are used exactly as written, which is how a cluster whose
                   images live in several registries is expressed.
 
+                  Discovery is on by default: when profiles is empty and this is set, every tag the
+                  repository publishes becomes a catalog entry, so pushing a profile is enough to make
+                  it available. Listing entries in profiles turns discovery off and offers exactly
+                  those, which is how a cluster pins a curated set while the registry keeps growing.
+
                   It names a repository, not a tag: "ghcr.io/acme/vllm-vcr-profiles", never
                   "ghcr.io/acme/vllm-vcr-profiles:latest".
                 maxLength: 255

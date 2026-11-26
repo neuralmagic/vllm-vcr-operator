@@ -30,6 +30,15 @@ import (
 // change, so they are retried with backoff.
 const DefaultRetryInterval = 30 * time.Second
 
+// DefaultDiscoveryInterval is how often a discovering cluster looks for newly published
+// profiles.
+//
+// Discovery reacts to the registry, not to a Kubernetes event: a profile pushed upstream
+// produces no watch notification, so without a periodic look a cluster would never see it.
+// The interval is deliberately long — a catalog is not a live quantity, and every pass is a
+// registry round trip per tag.
+const DefaultDiscoveryInterval = 10 * time.Minute
+
 // Options configures a VcrGpuClusterReconciler.
 type Options struct {
 	// Client reads and writes the environment, the device plugin resources, and
@@ -56,6 +65,10 @@ type Options struct {
 	// Default: DefaultRetryInterval.
 	RetryInterval time.Duration
 
+	// DiscoveryInterval is how often a discovering cluster re-lists the profile registry.
+	// Default: DefaultDiscoveryInterval.
+	DiscoveryInterval time.Duration
+
 	// Recorder emits diagnostics for condition changes. It never carries Secret
 	// values. Default: no events.
 	Recorder record.EventRecorder
@@ -63,7 +76,14 @@ type Options struct {
 
 // ResolverFactory builds a registry resolver for the pull credentials of one
 // profile image.
-type ResolverFactory func(registry.Options) registry.Resolver
+type ResolverFactory func(registry.Options) ProfileRegistry
+
+// ProfileRegistry is what reconciliation needs from a registry: resolve an image to a
+// digest, and list what a repository publishes.
+type ProfileRegistry interface {
+	registry.Resolver
+	registry.Tagger
+}
 
 // VcrGpuClusterReconciler reconciles the singleton VcrGpuCluster:
 // the published profile catalog, the environment conditions, and the synthetic
@@ -91,6 +111,10 @@ type VcrGpuClusterReconciler struct {
 	// RetryInterval is the requeue delay for retryable resolution failures.
 	RetryInterval time.Duration
 
+	// DiscoveryInterval is the requeue delay for a catalog discovered from the registry,
+	// which no Kubernetes event announces.
+	DiscoveryInterval time.Duration
+
 	// Recorder emits diagnostics for condition changes.
 	Recorder record.EventRecorder
 }
@@ -111,7 +135,7 @@ func NewVcrGpuClusterReconciler(opts Options) (*VcrGpuClusterReconciler, error) 
 
 	newResolver := opts.NewResolver
 	if newResolver == nil {
-		newResolver = func(o registry.Options) registry.Resolver { return registry.New(o) }
+		newResolver = func(o registry.Options) ProfileRegistry { return registry.New(o) }
 	}
 	now := opts.Now
 	if now == nil {
@@ -121,6 +145,10 @@ func NewVcrGpuClusterReconciler(opts Options) (*VcrGpuClusterReconciler, error) 
 	if retryInterval <= 0 {
 		retryInterval = DefaultRetryInterval
 	}
+	discoveryInterval := opts.DiscoveryInterval
+	if discoveryInterval <= 0 {
+		discoveryInterval = DefaultDiscoveryInterval
+	}
 
 	reconciler := &VcrGpuClusterReconciler{
 		Client:            opts.Client,
@@ -128,6 +156,7 @@ func NewVcrGpuClusterReconciler(opts Options) (*VcrGpuClusterReconciler, error) 
 		NewResolver:       newResolver,
 		Now:               now,
 		RetryInterval:     retryInterval,
+		DiscoveryInterval: discoveryInterval,
 		Recorder:          opts.Recorder,
 	}
 	reconciler.DevicePlugin = &DevicePluginReconciler{
@@ -197,7 +226,16 @@ func (r *VcrGpuClusterReconciler) reconcileEnvironment(ctx context.Context, env 
 	if profiles.retry {
 		return ctrl.Result{RequeueAfter: r.RetryInterval}, nil
 	}
+	if discovering(env) {
+		// Nothing in Kubernetes notifies us about a new tag.
+		return ctrl.Result{RequeueAfter: r.DiscoveryInterval}, nil
+	}
 	return ctrl.Result{}, nil
+}
+
+// discovering reports whether the catalog comes from the registry rather than a spec list.
+func discovering(env *vcrv1alpha1.VcrGpuCluster) bool {
+	return len(env.Spec.Profiles) == 0 && env.Spec.ProfileRegistry != ""
 }
 
 // publishStatus writes the reconciled catalog and the three conditions, and only

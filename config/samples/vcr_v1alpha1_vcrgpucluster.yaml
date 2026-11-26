@@ -26,10 +26,12 @@ spec:
   # selected node.
   devicesPerNode: 8
   gpuType: H200
-  # Where profiles come from. With it set, entries below name an identity inside this
-  # repository: "qwen3-0.6b-h200-tp1-bf16" becomes <profileRegistry>:qwen3-0.6b-h200-tp1-bf16,
-  # and a reference to another registry is refused rather than fetched. Leave it unset to
-  # list absolute references from several registries.
+  # Where profiles come from.
+  #
+  # Left without a `profiles` list, every tag in this repository is offered — pushing a
+  # profile upstream is enough to make it available. Listing profiles turns discovery off and
+  # offers exactly those entries, which is what this sample does: the sample runs on a
+  # repository whose other tags are other people's experiments.
   profileRegistry: quay.io/opendatahub/vllm-vcr-profiles
   profiles:
     # A tag inside the registry above; reconciliation pins it to a digest.
