@@ -29,28 +29,7 @@ type profileReconciliation struct {
 	unavailable []string
 	// configured is the number of profile images in the spec.
 	configured int
-	// discovery is set when the catalog came from the profile registry rather than from an
-	// explicit list, so the condition can say where the entries came from.
-	discovery *discoveryResult
 }
-
-// discoveryResult describes one catalog discovery.
-type discoveryResult struct {
-	registry string
-	// found is the number of tags the registry published.
-	found int
-	// used is the number of tags that became catalog entries.
-	used int
-	// truncated is the number of tags skipped because of MaxDiscoveredProfiles.
-	truncated int
-}
-
-// MaxDiscoveredProfiles bounds how many tags one repository contributes to a catalog.
-//
-// It matches the spec.profiles limit: a registry that accumulates profiles must not turn
-// one configuration into unbounded work on every reconcile, and a catalog this large is a
-// sign that the repository should be curated and listed explicitly.
-const MaxDiscoveredProfiles = 64
 
 // condition renders the ProfilesReconciled condition.
 func (p profileReconciliation) condition() metav1.Condition {
@@ -69,21 +48,13 @@ func (p profileReconciliation) condition() metav1.Condition {
 			Reason:  vcrv1alpha1.ReasonRegistryUnavailable,
 			Message: joinReasons(p.unavailable, nil),
 		}
-	case p.configured == 0 && p.discovery == nil:
+	case p.configured == 0:
 		return metav1.Condition{
 			Status: metav1.ConditionTrue,
 			Reason: vcrv1alpha1.ReasonAllProfilesUsable,
 			// An empty catalog is not an error, but it makes every GPU workload
 			// unadmittable, so say so instead of claiming a vacuous success.
-			Message: "no profile images are configured and no profile registry is set to discover them in: " +
-				"admission rejects GPU workloads until spec.profiles or spec.profileRegistry provides a profile",
-		}
-	case p.discovery != nil:
-		return metav1.Condition{
-			Status: metav1.ConditionTrue,
-			Reason: vcrv1alpha1.ReasonAllProfilesUsable,
-			Message: fmt.Sprintf("%d profile(s) discovered in %s: admission pins the published digests%s",
-				p.discovery.used, p.discovery.registry, truncationNote(p.discovery)),
+			Message: "no profile images are configured: admission rejects GPU workloads until spec.profiles references a profile image",
 		}
 	default:
 		return metav1.Condition{
@@ -110,10 +81,11 @@ func joinReasons(primary, secondary []string) string {
 // catalog is built from all entries so a recorded identity that resolves to two
 // digests is reported here rather than at admission time.
 func (r *VcrGpuClusterReconciler) reconcileProfiles(ctx context.Context, env *vcrv1alpha1.VcrGpuCluster) profileReconciliation {
-	sources, result, candidates := r.catalogSources(ctx, env)
-	seen := make(map[string]struct{}, len(sources))
+	result := profileReconciliation{configured: len(env.Spec.Profiles)}
+	seen := make(map[string]struct{}, len(env.Spec.Profiles))
+	candidates := make([]profile.Candidate, 0, len(env.Spec.Profiles))
 
-	for _, source := range sources {
+	for _, source := range env.Spec.Profiles {
 		// A cluster names one registry; a profile entry names what to look for inside it.
 		reference, err := registry.JoinReference(env.Spec.ProfileRegistry, source.Image)
 		if err != nil {
@@ -153,65 +125,6 @@ func (r *VcrGpuClusterReconciler) reconcileProfiles(ctx context.Context, env *vc
 		result.unusable = append(result.unusable, err.Error())
 	}
 	return result
-}
-
-// catalogSources decides where the catalog comes from.
-//
-// Discovery is on by default: a cluster that names a profile registry and no explicit
-// profiles offers everything that registry publishes, so publishing a profile is enough to
-// make it available. Listing profiles turns discovery off and uses exactly that list, which
-// is how a cluster pins a curated set while the registry keeps growing.
-func (r *VcrGpuClusterReconciler) catalogSources(ctx context.Context, env *vcrv1alpha1.VcrGpuCluster) (
-	[]vcrv1alpha1.ProfileSource, profileReconciliation, []profile.Candidate) {
-
-	result := profileReconciliation{configured: len(env.Spec.Profiles)}
-	if len(env.Spec.Profiles) > 0 || env.Spec.ProfileRegistry == "" {
-		return env.Spec.Profiles, result, make([]profile.Candidate, 0, len(env.Spec.Profiles))
-	}
-
-	discovered, found, err := r.discoverProfiles(ctx, env)
-	if err != nil {
-		result.discovery = &discoveryResult{registry: env.Spec.ProfileRegistry}
-		result.retry = true
-		result.unavailable = append(result.unavailable, err.Error())
-		// Keep what was published before: a registry outage must not empty a catalog that
-		// Pods were admitted against, and those digests are already pinned. Republishing
-		// them needs no registry call, because a reconciled entry is stable.
-		previous := make([]vcrv1alpha1.ProfileSource, 0, len(env.Status.Profiles))
-		for _, entry := range env.Status.Profiles {
-			previous = append(previous, vcrv1alpha1.ProfileSource{Image: entry.Image})
-		}
-		return previous, result, make([]profile.Candidate, 0, len(previous))
-	}
-
-	result.discovery = &discoveryResult{
-		registry:  env.Spec.ProfileRegistry,
-		found:     found,
-		used:      len(discovered),
-		truncated: found - len(discovered),
-	}
-	sources := make([]vcrv1alpha1.ProfileSource, 0, len(discovered))
-	for _, tag := range discovered {
-		sources = append(sources, vcrv1alpha1.ProfileSource{Image: tag})
-	}
-	return sources, result, make([]profile.Candidate, 0, len(sources))
-}
-
-// discoverProfiles lists the profile registry and returns the tags to offer, each already
-// joined to the registry so the rest of reconciliation sees an absolute reference.
-func (r *VcrGpuClusterReconciler) discoverProfiles(ctx context.Context, env *vcrv1alpha1.VcrGpuCluster) ([]string, int, error) {
-	credentials, err := r.pullCredentials(ctx, env, vcrv1alpha1.ProfileSource{})
-	if err != nil {
-		return nil, 0, fmt.Errorf("profile registry %q: %w", env.Spec.ProfileRegistry, err)
-	}
-	tags, err := r.NewResolver(registry.Options{Credentials: credentials.authenticate}).Tags(ctx, env.Spec.ProfileRegistry)
-	if err != nil {
-		return nil, 0, err
-	}
-	if len(tags) > MaxDiscoveredProfiles {
-		return tags[:MaxDiscoveredProfiles], len(tags), nil
-	}
-	return tags, len(tags), nil
 }
 
 // reconcileProfile resolves one configured profile image. It returns the entry to
@@ -351,14 +264,4 @@ func messageOf(condition *metav1.Condition, fallback string) string {
 		return fallback
 	}
 	return condition.Message
-}
-
-// truncationNote explains a bounded discovery, because a silently shortened catalog looks
-// like a repository with fewer profiles than it has.
-func truncationNote(discovery *discoveryResult) string {
-	if discovery.truncated == 0 {
-		return ""
-	}
-	return fmt.Sprintf("; %d more tag(s) in the registry are not offered: discovery is bounded at %d, "+
-		"list spec.profiles explicitly to choose which to use", discovery.truncated, MaxDiscoveredProfiles)
 }

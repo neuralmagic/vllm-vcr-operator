@@ -36,23 +36,15 @@ var fixedTime = time.Date(2024, 5, 1, 12, 0, 0, 0, time.UTC)
 // references it was asked to resolve and the options it was built with, so tests
 // can assert both that no call was made and which credentials were used.
 type fakeRegistry struct {
-	mu        sync.Mutex
-	resolved  map[string]registry.Resolved
-	errs      map[string]error
-	calls     []string
-	options   []registry.Options
-	listed    map[string][]string
-	listErrs  map[string]error
-	listCalls []string
+	mu       sync.Mutex
+	resolved map[string]registry.Resolved
+	errs     map[string]error
+	calls    []string
+	options  []registry.Options
 }
 
 func newFakeRegistry() *fakeRegistry {
-	return &fakeRegistry{
-		resolved: map[string]registry.Resolved{},
-		errs:     map[string]error{},
-		listed:   map[string][]string{},
-		listErrs: map[string]error{},
-	}
+	return &fakeRegistry{resolved: map[string]registry.Resolved{}, errs: map[string]error{}}
 }
 
 // resolve records what the given reference resolves to.
@@ -74,49 +66,11 @@ func (f *fakeRegistry) fail(ref string, err error) {
 	f.errs[ref] = err
 }
 
-// tags records what a repository publishes, for discovery.
-func (f *fakeRegistry) tags(repository string, tags ...string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.listed[repository] = tags
-}
-
-// failTags makes listing repository fail.
-func (f *fakeRegistry) failTags(repository string, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.listErrs[repository] = err
-}
-
-func (f *fakeRegistry) Tags(_ context.Context, repository string) ([]string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.listCalls = append(f.listCalls, repository)
-	if err, ok := f.listErrs[repository]; ok {
-		return nil, err
-	}
-	if tags, ok := f.listed[repository]; ok {
-		return tags, nil
-	}
-	return nil, fmt.Errorf("unknown repository %q", repository)
-}
-
-func (f *fakeRegistry) factory(opts registry.Options) controller.ProfileRegistry {
+func (f *fakeRegistry) factory(opts registry.Options) registry.Resolver {
 	f.mu.Lock()
 	f.options = append(f.options, opts)
 	f.mu.Unlock()
-	return fakeRegistryClient{registry: f}
-}
-
-// fakeRegistryClient gives the reconciler one value that both resolves and lists.
-type fakeRegistryClient struct{ registry *fakeRegistry }
-
-func (c fakeRegistryClient) Resolve(ctx context.Context, ref string) (registry.Resolved, error) {
-	return c.registry.resolveRef(ctx, ref)
-}
-
-func (c fakeRegistryClient) Tags(ctx context.Context, repository string) ([]string, error) {
-	return c.registry.Tags(ctx, repository)
+	return resolverFunc(f.resolveRef)
 }
 
 func (f *fakeRegistry) resolveRef(_ context.Context, ref string) (registry.Resolved, error) {
@@ -925,137 +879,5 @@ func TestProfileRegistryRefusesAnotherRegistry(t *testing.T) {
 	}
 	if len(reg.calls) != 0 {
 		t.Errorf("resolver was called for a reference outside the registry: %v", reg.calls)
-	}
-}
-
-// TestDiscoveryIsOnByDefault: naming a profile registry and no profiles offers everything
-// the registry publishes, so pushing a profile is enough to make it available.
-func TestDiscoveryIsOnByDefault(t *testing.T) {
-	const base = "ghcr.io/acme/vllm-vcr-profiles"
-	env := testEnvironment()
-	env.Spec.ProfileRegistry = base
-	env.Spec.Profiles = nil
-
-	metadata := contractMetadata(t, "qwen3-0.6b-h200-tp1-bf16", "Qwen/Qwen3-0.6B")
-	reg := newFakeRegistry()
-	reg.tags(base, "qwen3-0.6b-h200-tp1-bf16", "qwen3-0.6b-h200-tp1-bf16-poisson")
-	for _, tag := range []string{"qwen3-0.6b-h200-tp1-bf16", "qwen3-0.6b-h200-tp1-bf16-poisson"} {
-		reg.resolve(base+":"+tag, "sha256:1111111111111111111111111111111111111111111111111111111111111111", metadata)
-	}
-	reconciler, c, _ := environmentReconciler(t, reg, env)
-
-	stored, result := reconcile(t, reconciler, c)
-
-	if len(stored.Status.Profiles) != 2 {
-		t.Fatalf("status.profiles = %+v, want both discovered tags", stored.Status.Profiles)
-	}
-	// No Kubernetes event announces a newly published tag, so discovery has to look again.
-	if result.RequeueAfter == 0 {
-		t.Error("a discovering catalog did not schedule another look")
-	}
-	for _, entry := range stored.Status.Profiles {
-		if !strings.HasPrefix(entry.Image, base+":") {
-			t.Errorf("published image %q is not an absolute reference in the registry", entry.Image)
-		}
-	}
-	profilesCondition := conditionOf(t, stored, vcrv1alpha1.ConditionProfilesReconciled)
-	if !strings.Contains(profilesCondition.Message, "discovered") {
-		t.Errorf("condition = %+v, want it to say the catalog was discovered", profilesCondition)
-	}
-}
-
-// TestExplicitProfilesTurnDiscoveryOff: listing profiles is how a cluster pins a curated set
-// while the registry keeps growing, so the registry must not be listed at all.
-func TestExplicitProfilesTurnDiscoveryOff(t *testing.T) {
-	const base = "ghcr.io/acme/vllm-vcr-profiles"
-	env := testEnvironment()
-	env.Spec.ProfileRegistry = base
-	env.Spec.Profiles = []vcrv1alpha1.ProfileSource{{Image: "qwen3-0.6b-h200-tp1-bf16"}}
-
-	reg := newFakeRegistry()
-	reg.tags(base, "qwen3-0.6b-h200-tp1-bf16", "qwen3-0.6b-h200-tp1-bf16-poisson")
-	reg.resolve(base+":qwen3-0.6b-h200-tp1-bf16", "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-		contractMetadata(t, "qwen3-0.6b-h200-tp1-bf16", "Qwen/Qwen3-0.6B"))
-	reconciler, c, _ := environmentReconciler(t, reg, env)
-
-	stored, result := reconcile(t, reconciler, c)
-
-	if len(stored.Status.Profiles) != 1 {
-		t.Fatalf("status.profiles = %+v, want only the listed profile", stored.Status.Profiles)
-	}
-	if result.RequeueAfter != 0 {
-		t.Errorf("an explicit catalog scheduled a discovery refresh after %s", result.RequeueAfter)
-	}
-	reg.mu.Lock()
-	listed := append([]string(nil), reg.listCalls...)
-	reg.mu.Unlock()
-	if len(listed) != 0 {
-		t.Errorf("the registry was listed %v although profiles were listed explicitly", listed)
-	}
-}
-
-// TestDiscoveryFailureKeepsThePreviousCatalog: a registry outage must not empty a catalog
-// that Pods were admitted against, and the condition has to say it is retrying.
-func TestDiscoveryFailureKeepsThePreviousCatalog(t *testing.T) {
-	const base = "ghcr.io/acme/vllm-vcr-profiles"
-	env := testEnvironment()
-	env.Spec.ProfileRegistry = base
-	env.Spec.Profiles = nil
-
-	metadata := contractMetadata(t, "qwen3-0.6b-h200-tp1-bf16", "Qwen/Qwen3-0.6B")
-	reference := base + ":qwen3-0.6b-h200-tp1-bf16"
-	reg := newFakeRegistry()
-	reg.tags(base, "qwen3-0.6b-h200-tp1-bf16")
-	reg.resolve(reference, "sha256:1111111111111111111111111111111111111111111111111111111111111111", metadata)
-	reconciler, c, _ := environmentReconciler(t, reg, env)
-
-	first, _ := reconcile(t, reconciler, c)
-	if len(first.Status.Profiles) != 1 {
-		t.Fatalf("first reconcile published %+v", first.Status.Profiles)
-	}
-
-	reg.failTags(base, fmt.Errorf("registry unavailable"))
-	second, result := reconcile(t, reconciler, c)
-
-	if len(second.Status.Profiles) != 1 || second.Status.Profiles[0].Image != reference {
-		t.Fatalf("status.profiles = %+v after a discovery failure, want the previous entry kept", second.Status.Profiles)
-	}
-	profilesCondition := conditionOf(t, second, vcrv1alpha1.ConditionProfilesReconciled)
-	if profilesCondition.Status != metav1.ConditionFalse || profilesCondition.Reason != vcrv1alpha1.ReasonRegistryUnavailable {
-		t.Errorf("condition = %+v, want a retrying registry failure", profilesCondition)
-	}
-	if result.RequeueAfter == 0 {
-		t.Error("a discovery failure did not ask for a retry")
-	}
-}
-
-// TestDiscoveryIsBounded: a repository that accumulates profiles must not turn one
-// configuration into unbounded work on every reconcile, and the truncation has to be visible
-// because a shortened catalog otherwise looks like a smaller repository.
-func TestDiscoveryIsBounded(t *testing.T) {
-	const base = "ghcr.io/acme/vllm-vcr-profiles"
-	env := testEnvironment()
-	env.Spec.ProfileRegistry = base
-	env.Spec.Profiles = nil
-
-	metadata := contractMetadata(t, "qwen3-0.6b-h200-tp1-bf16", "Qwen/Qwen3-0.6B")
-	reg := newFakeRegistry()
-	tags := make([]string, 0, controller.MaxDiscoveredProfiles+3)
-	for i := 0; i < controller.MaxDiscoveredProfiles+3; i++ {
-		tag := fmt.Sprintf("profile-%03d", i)
-		tags = append(tags, tag)
-		reg.resolve(base+":"+tag, "sha256:1111111111111111111111111111111111111111111111111111111111111111", metadata)
-	}
-	reg.tags(base, tags...)
-	reconciler, c, _ := environmentReconciler(t, reg, env)
-
-	stored, _ := reconcile(t, reconciler, c)
-
-	if len(stored.Status.Profiles) != controller.MaxDiscoveredProfiles {
-		t.Fatalf("published %d profiles, want the bound of %d", len(stored.Status.Profiles), controller.MaxDiscoveredProfiles)
-	}
-	profilesCondition := conditionOf(t, stored, vcrv1alpha1.ConditionProfilesReconciled)
-	if !strings.Contains(profilesCondition.Message, "3 more tag(s)") {
-		t.Errorf("condition %q does not report the truncation", profilesCondition.Message)
 	}
 }

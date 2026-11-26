@@ -618,7 +618,6 @@ type fakeRegistry struct {
 	resolved map[string]registry.Resolved
 	options  []registry.Options
 	calls    []string
-	tags     map[string][]string
 }
 
 // newFakeRegistry returns an empty fake registry.
@@ -639,40 +638,11 @@ func (f *fakeRegistry) register(ref, digest string, metadata []byte) {
 }
 
 // factory is the controller.ResolverFactory the reconciler is built with.
-func (f *fakeRegistry) factory(opts registry.Options) controller.ProfileRegistry {
+func (f *fakeRegistry) factory(opts registry.Options) registry.Resolver {
 	f.mu.Lock()
 	f.options = append(f.options, opts)
 	f.mu.Unlock()
-	return fakeRegistryClient{registry: f}
-}
-
-// fakeRegistryClient gives the reconciler one value that resolves and lists.
-type fakeRegistryClient struct{ registry *fakeRegistry }
-
-func (c fakeRegistryClient) Resolve(ctx context.Context, ref string) (registry.Resolved, error) {
-	return c.registry.resolve(ctx, ref)
-}
-
-// Tags answers for repositories the suite declared; anything else is unknown, which is what
-// the operator must report rather than treat as an empty registry.
-func (c fakeRegistryClient) Tags(_ context.Context, repository string) ([]string, error) {
-	c.registry.mu.Lock()
-	defer c.registry.mu.Unlock()
-	tags, ok := c.registry.tags[repository]
-	if !ok {
-		return nil, fmt.Errorf("profile registry %q: list tags: not found", repository)
-	}
-	return tags, nil
-}
-
-// addTags declares what a repository publishes.
-func (f *fakeRegistry) addTags(repository string, tags ...string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.tags == nil {
-		f.tags = map[string][]string{}
-	}
-	f.tags[repository] = tags
+	return resolverFunc(f.resolve)
 }
 
 // resolve answers from the registered fixtures.
