@@ -113,6 +113,11 @@ type Request struct {
 	// from its Pod spec.
 	GPUDevices int32
 
+	// ProfileID pins the profile selection to one identity, when the workload's
+	// namespace selects one through a VcrGpuProfile. It narrows the candidate set and
+	// never relaxes the workload's own requirements.
+	ProfileID string
+
 	// PodIdentity identifies the Pod being admitted, for example its name or its
 	// "ip:port". It is used to build the KV-event topic llm-d expects. When it is
 	// empty the simulator derives the topic from its engine id and the plan
@@ -152,7 +157,7 @@ func Translate(req Request) (*plan.Admission, error) {
 	rejections = append(rejections, checkInvocation(cfg)...)
 
 	// 2. Requirements and profile selection.
-	requirements := buildRequirements(cfg, env.GPUType, req.GPUDevices)
+	requirements := buildRequirements(cfg, env.GPUType, req.GPUDevices, req.ProfileID)
 	if len(rejections) == 0 {
 		if rej := checkDeviceCount(req, env); rej != nil {
 			rejections = append(rejections, *rej)
@@ -398,8 +403,9 @@ func invocationCapabilities(cfg *vllm.Config) []capabilityRequest {
 // buildRequirements turns the workload's explicit settings into the constraints
 // profile selection must satisfy. Unset optional settings leave the profile's
 // recorded value standing.
-func buildRequirements(cfg *vllm.Config, gpuType string, gpuDevices int32) profile.Requirements {
+func buildRequirements(cfg *vllm.Config, gpuType string, gpuDevices int32, profileID string) profile.Requirements {
 	req := profile.Requirements{
+		ProfileID:         profileID,
 		Model:             modelName(cfg),
 		ModelRevision:     stringValue(cfg.Model.Revision),
 		Tokenizer:         stringValue(cfg.Tokenizer.Name),

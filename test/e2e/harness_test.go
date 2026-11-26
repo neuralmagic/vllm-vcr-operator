@@ -280,6 +280,12 @@ func (h *harness) startManager(ctx context.Context) error {
 		return fmt.Errorf("register the simulation environment reconciler: %w", err)
 	}
 
+	// A namespace's profile selection is resolved against the reconciled catalog, so the
+	// suite exercises the same wiring the manager installs.
+	if err := controller.NewVcrGpuProfileReconciler(mgr.GetClient()).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("register the GPU profile selection reconciler: %w", err)
+	}
+
 	if err := operatorwebhook.SetupWithManager(mgr, operatorwebhook.Options{
 		Client:            mgr.GetClient(),
 		Reader:            mgr.GetAPIReader(),

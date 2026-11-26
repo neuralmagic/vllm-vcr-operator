@@ -9,7 +9,8 @@ Read before touching code.
    - `profile-image.md` (profile OCI image + metadata schema)
    - `admission.md` (webhook behavior + provenance annotations)
    - `runtime-layout.md` (process/container layout)
-3. `api/v1alpha1/` — the `VcrGpuCluster` API. Treat as frozen unless the
+3. `api/v1alpha1/` — the `VcrGpuCluster` (cluster) and `VcrGpuProfile` (namespaced)
+   APIs. Treat as frozen unless the
    ticket says otherwise; changes need an API review.
 4. `internal/names/names.go` — shared identifiers. Do not duplicate literals.
 
@@ -49,7 +50,7 @@ make manifests generate         # regenerate CRD/deepcopy after API edits
 
 | Path | Owner topic |
 | --- | --- |
-| `api/v1alpha1` | VcrGpuCluster API |
+| `api/v1alpha1` | VcrGpuCluster + VcrGpuProfile APIs |
 | `internal/vllm` | vLLM invocation/config resolution |
 | `internal/profile` | profile metadata, catalog, selection |
 | `internal/translator` | settings policy → admission plan |

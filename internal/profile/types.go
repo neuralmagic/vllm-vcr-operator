@@ -154,6 +154,14 @@ type Capabilities struct {
 // from the environment configuration; the workload supplies the requested
 // device quantity.
 type Requirements struct {
+	// ProfileID pins the selection to one recorded profile identity, when the
+	// namespace asked for one (a VcrGpuProfile). It narrows the candidate set to that
+	// profile and never relaxes the other requirements: a selection an administrator
+	// published still has to be able to serve the workload.
+	//
+	// Empty means the catalog is searched by the workload's own requirements.
+	ProfileID string
+
 	Model             string
 	ModelRevision     string
 	Tokenizer         string

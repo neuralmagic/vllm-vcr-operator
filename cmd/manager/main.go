@@ -96,6 +96,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// A namespace's profile selection is resolved against the cluster's catalog so that a
+	// wrong identity is reported on the object rather than at Pod creation.
+	if err := controller.NewVcrGpuProfileReconciler(mgr.GetClient()).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to register the GPU profile selection reconciler")
+		os.Exit(1)
+	}
+
 	// Admission writes the projected pull Secret, and this sweep keeps it right:
 	// rotated sources reach every copy and copies whose Pods are gone disappear.
 	if err := mgr.Add(&controller.ProjectedSecretReconciler{

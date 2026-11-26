@@ -203,6 +203,7 @@ done
 ########################################
 mutating_path='/mutate-v1-pod'
 validating_path='/validate-vcr-opendatahub-io-v1alpha1-vcrgpucluster'
+profile_validating_path='/validate-vcr-opendatahub-io-v1alpha1-vcrgpuprofile'
 
 build_has "mutating webhook path $mutating_path" \
   "$MUTATING_SEL"' | select(.clientConfig.service.path == "'"$mutating_path"'")'
@@ -252,6 +253,18 @@ build_has "validating webhook validates vcrgpuclusters, fail-closed" \
      and (.admissionReviewVersions | any_c(. == "v1"))
      and (.rules[0].resources | any_c(. == "vcrgpuclusters")))'
 
+build_has "validating webhook path $profile_validating_path" \
+  "$VALIDATING_SEL"' | select(.clientConfig.service.path == "'"$profile_validating_path"'")'
+
+# Two selections in one namespace would make the recording a Pod runs depend on
+# listing order, so the uniqueness rule must be enforced fail-closed.
+build_has "validating webhook validates vcrgpuprofiles per namespace, fail-closed" \
+  "$VALIDATING_SEL"' | select(.failurePolicy == "Fail"
+     and .sideEffects == "None"
+     and (.rules[0].scope == "Namespaced")
+     and (.rules[0].resources | any_c(. == "vcrgpuprofiles"))
+     and (.rules[0].operations | any_c(. == "CREATE")))'
+
 # CA injection is wired through cert-manager; both registrations must point at the
 # Certificate that also issues the manager's serving certificate.
 for kind in MutatingWebhookConfiguration ValidatingWebhookConfiguration; do
@@ -291,7 +304,9 @@ require_rbac "" nodes get list watch
 require_rbac apps daemonsets get list watch create update patch delete
 require_rbac vcr.opendatahub-io vcrgpuclusters get list watch update patch
 require_rbac vcr.opendatahub-io vcrgpuclusters/status get update patch
-ok "RBAC covers pods, secrets, nodes, daemonsets, vcrgpuclusters(+status)"
+require_rbac vcr.opendatahub-io vcrgpuprofiles get list watch
+require_rbac vcr.opendatahub-io vcrgpuprofiles/status get update patch
+ok "RBAC covers pods, secrets, nodes, daemonsets, vcrgpuclusters and vcrgpuprofiles (+status)"
 
 build_has "manager ServiceAccount is bound to manager-role" \
   'select(.kind == "ClusterRoleBinding" and .roleRef.name == "manager-role")

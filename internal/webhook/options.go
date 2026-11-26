@@ -123,7 +123,10 @@ func SetupWithManager(mgr ctrl.Manager, opts Options) error {
 	if err := mutator.SetupWithManager(mgr); err != nil {
 		return err
 	}
-	return NewEnvironmentValidator().SetupWithManager(mgr)
+	if err := NewEnvironmentValidator().SetupWithManager(mgr); err != nil {
+		return err
+	}
+	return NewProfileValidator(mgr.GetClient()).SetupWithManager(mgr)
 }
 
 // SetupWithManager registers the Pod mutator at PodMutatorPath.
@@ -136,5 +139,12 @@ func (m *PodMutator) SetupWithManager(mgr ctrl.Manager) error {
 // EnvironmentValidatorPath.
 func (v *EnvironmentValidator) SetupWithManager(mgr ctrl.Manager) error {
 	mgr.GetWebhookServer().Register(EnvironmentValidatorPath, &crwebhook.Admission{Handler: v})
+	return nil
+}
+
+// SetupWithManager registers the profile selection validator at
+// ProfileValidatorPath.
+func (v *ProfileValidator) SetupWithManager(mgr ctrl.Manager) error {
+	mgr.GetWebhookServer().Register(ProfileValidatorPath, &crwebhook.Admission{Handler: v})
 	return nil
 }

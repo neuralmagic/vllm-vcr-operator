@@ -2,6 +2,7 @@
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuclusters/status,verbs=get
+// +kubebuilder:rbac:groups=vcr.opendatahub-io,resources=vcrgpuprofiles,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Package webhook implements the operator's admission webhooks and pull-secret

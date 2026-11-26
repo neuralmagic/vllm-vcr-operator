@@ -1,0 +1,17 @@
+# A workload owner's choice of recording.
+#
+# Exactly one may exist per namespace: admission pins every simulated workload in
+# the namespace to the profile named here. The id must be one the VcrGpuCluster's
+# catalog offers; the operator reports what it resolves to in status, including the
+# digest-pinned image, so the choice is visible without reading the cluster config.
+#
+# Removing the object returns the namespace to requirement-based selection.
+apiVersion: vcr.opendatahub-io/v1alpha1
+kind: VcrGpuProfile
+metadata:
+  name: selection
+  namespace: llm-d-sim
+spec:
+  # Pick a recording, never an image: images are registered by the administrator in
+  # the VcrGpuCluster, so a user cannot introduce code of their own.
+  profile: qwen3-0.6b-h200-tp1-bf16

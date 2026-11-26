@@ -148,7 +148,7 @@ images you built or the release images from this repository's release workflow.
 
 | Path | Contents |
 | --- | --- |
-| `api/v1alpha1` | The cluster-scoped `VcrGpuCluster` API |
+| `api/v1alpha1` | The `VcrGpuCluster` (cluster) and `VcrGpuProfile` (namespaced selection) APIs |
 | `internal/vllm` | vLLM 0.33.0 invocation and configuration resolution |
 | `internal/profile` | Profile metadata, catalog, and selection rules |
 | `internal/translator` | Settings policy → admission plan |

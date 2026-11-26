@@ -16,9 +16,18 @@ network API; only inference execution is simulated.
 | Profile exporter | `cmd/profileexport` | Shipped inside profile images; copies metadata + trace into the Pod volume |
 | Translator/runtime (library) | `internal/translator`, `internal/runtime` | Turns a workload into settings, a plan, and a mutated Pod |
 
-Configuration is one cluster-scoped CR, `VcrGpuCluster`, name `default`
-only (enforced by a CRD rule, not convention). Nothing else is a CR: profile
-metadata lives in the CR's status, not in a `Profile` resource.
+Two CRs, with different owners:
+
+- `VcrGpuCluster` (cluster scoped, name `default` only, enforced by a CRD rule) is the
+  platform configuration: synthetic device count, the registered profile images, their
+  reconcilied catalog, and the GPU type being simulated. Its `status.profiles` is the
+  catalog admission selects from; there is no separate `Profile` resource, because a
+  catalogue entry only exists as something the cluster offers.
+- `VcrGpuProfile` (namespaced, at most one per namespace) is a workload owner's choice:
+  it names one catalog identity, and admission pins every simulated workload in that
+  namespace to it. It can only choose among identities the cluster already offers — it
+  never names an image — so user-level selection cannot introduce code, and removing the
+  object returns the namespace to requirement-based selection.
 
 ## Path of a Pod
 
@@ -30,6 +39,7 @@ API server → mutating webhook (only GPU Pods, only labelled namespaces)
         │  1. resolve vLLM invocation  → internal/vllm   (0.33.0 semantics)
         │  2. apply settings policy    → internal/translator
         │  3. select exactly one profile from status.profiles
+        │     (narrowed by the namespace's VcrGpuProfile, when it has one)
         │  4. build the plan, mutate the Pod → internal/runtime
         │  5. copy the pull Secret the profile needs into the namespace
         ▼

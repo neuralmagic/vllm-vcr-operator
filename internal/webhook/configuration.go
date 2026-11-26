@@ -3,6 +3,8 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/go-logr/logr"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -11,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
 	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
@@ -174,4 +177,44 @@ func (m *PodMutator) recordOperatorProblem(env *vcrv1alpha1.VcrGpuCluster, log l
 		return
 	}
 	m.recorder.Event(env, corev1.EventTypeWarning, "AdmissionDenied", detail)
+}
+
+// profileSelection reads the namespace's VcrGpuProfile, if it has one.
+//
+// A selection names a profile identity, never an image: what it can choose among is what
+// the cluster's catalog offers, so a workload owner cannot introduce a recording of their
+// own. Exactly one selection may exist per namespace — the validating webhook enforces it
+// on create — but a namespace can carry more than one if the webhook was bypassed, and
+// then the choice would depend on listing order, which is not a decision to make
+// silently. That case is an operator problem: the workload is fine either way.
+func (m *PodMutator) profileSelection(ctx context.Context, namespace string) (VcrGpuProfileSelection, *admissionDenial) {
+	listed := &vcrv1alpha1.VcrGpuProfileList{}
+	if err := m.client.List(ctx, listed, client.InNamespace(namespace)); err != nil {
+		return VcrGpuProfileSelection{}, operatorFailure(
+			"cannot read VcrGpuProfile objects in namespace %q: %v", namespace, err)
+	}
+	switch len(listed.Items) {
+	case 0:
+		return VcrGpuProfileSelection{}, nil
+	case 1:
+		selection := listed.Items[0]
+		return VcrGpuProfileSelection{Name: selection.Name, ProfileID: selection.Spec.Profile}, nil
+	default:
+		names := make([]string, len(listed.Items))
+		for i, item := range listed.Items {
+			names[i] = item.Name
+		}
+		sort.Strings(names)
+		return VcrGpuProfileSelection{}, operatorFailure(
+			"namespace %q has %d VcrGpuProfiles (%s): exactly one profile selection is allowed per namespace",
+			namespace, len(listed.Items), strings.Join(names, ", "))
+	}
+}
+
+// VcrGpuProfileSelection is the namespace's choice of recording.
+type VcrGpuProfileSelection struct {
+	// Name is the VcrGpuProfile object that made the choice, for messages.
+	Name string
+	// ProfileID is the recorded profile identity it selects.
+	ProfileID string
 }

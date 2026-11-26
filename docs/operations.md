@@ -174,6 +174,46 @@ kubectl -n <ns> get pod <pod> -o jsonpath='{.metadata.annotations}' | jq .
 kubectl -n <ns> get pod <pod> -o jsonpath='{range .spec.containers[*]}{.name}{"\t"}{.resources}{"\n"}{end}'
 ```
 
+## Choosing a recorded profile per namespace
+
+The cluster registers candidate profile images and publishes the reconciled catalog:
+
+```bash
+kubectl get vgc default -o jsonpath='{range .status.profiles[*]}{.image}{"\n"}{end}'
+```
+
+Without any further object, admission selects by the workload's own requirements — model,
+GPU count, tensor parallelism, dtype, and so on. When that is not enough (two recordings fit
+the same workload, and you want a specific one), a workload owner pins the choice with one
+namespaced object:
+
+```yaml
+apiVersion: vcr.opendatahub-io/v1alpha1
+kind: VcrGpuProfile
+metadata:
+  name: selection
+  namespace: team-a
+spec:
+  profile: qwen3-0.6b-h200-tp1-bf16-poisson     # an id from the catalog, never an image
+```
+
+Exactly one may exist per namespace: admission pins every simulated workload in the
+namespace to it, so a second one is refused with the name of the object that already holds
+the choice. The object reports what the id resolved to, digest included, without waiting for
+a Pod to be submitted:
+
+```bash
+kubectl -n team-a get vgp selection -o yaml
+kubectl -n team-a get vgp selection -o jsonpath='{.status.resolved}{"\n"}'
+kubectl -n team-a get vgp selection -o jsonpath='{range .status.conditions[*]}{.type}{"="}{.status}{" "}{.reason}{": "}{.message}{"\n"}{end}'
+```
+
+An id the catalog does not publish is reported on the object (`Ready=False`, reason
+`NotOffered`, with the ids that are published), and admission refuses a Pod in that namespace
+naming the same list. Deleting the object returns the namespace to requirement-based
+selection. A `VcrGpuProfile` never relaxes the workload's requirements: it narrows the
+catalog to one recording that must still be able to serve the Pod.
+
 ## Capacity exhaustion
 
 Capacity is `devicesPerNode × selected nodes`. It is a scheduling quantity:

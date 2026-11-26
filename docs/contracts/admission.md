@@ -23,6 +23,29 @@ Rejection is the default outcome for unresolved or unsupported configuration.
 Rejection messages name the offending setting and the reason, and never include
 credential values.
 
+## Profile selection
+
+Selection is all-or-nothing: exactly one catalog entry must satisfy the workload, and an
+empty result and an ambiguous result are both rejections. Picking among matches would make
+the recording depend on catalog ordering.
+
+A namespace narrows the catalog by creating one `VcrGpuProfile`:
+
+- It names a **profile id**, never an image reference, so a workload owner can only choose
+  among recordings an administrator registered.
+- Admission applies it as an additional requirement. It never relaxes the workload's own
+  requirements: the selected profile must still be able to serve the Pod (model, GPU count,
+  tensor parallelism, dtype, quantization, block size, context coverage).
+- An id the catalog does not publish is a workload problem and the denial lists the ids it
+  does publish. An id the catalog publishes but cannot use is reported as such, with the
+  catalog's own message.
+- Exactly one `VcrGpuProfile` may exist per namespace; the validating webhook refuses a
+  second one and the denial names the object that already holds the choice. If two exist
+  anyway (validator bypassed, or objects created before it), admission reports an operator
+  problem instead of picking one.
+- A namespace without a `VcrGpuProfile` selects by the workload's requirements alone, as
+  before.
+
 ## Mutation
 
 For an applicable Pod the operator:

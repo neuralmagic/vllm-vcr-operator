@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -145,6 +146,22 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 		return m.deny(pod, log, dryRunRequest, denial)
 	}
 
+	// A namespace may pin the recording its simulated GPUs run. The selection narrows the
+	// catalog to one identity; it never relaxes the workload's own requirements.
+	selection, denial := m.profileSelection(ctx, pod.Namespace)
+	if denial != nil {
+		m.recordOperatorProblem(env, log, denial.detail)
+		return m.deny(pod, log, dryRunRequest, denial)
+	}
+	if selection.ProfileID != "" {
+		offered := catalog.IDs()
+		if !slices.Contains(offered, selection.ProfileID) {
+			return m.deny(pod, log, dryRunRequest, workloadFailure(
+				"VcrGpuProfile %q in namespace %q selects profile %q, which the cluster's catalog does not offer; offered profiles: %s",
+				selection.Name, pod.Namespace, selection.ProfileID, offeredProfiles(offered)))
+		}
+	}
+
 	config, err := vllm.Resolve(vllm.Invocation{
 		Container: *workload,
 		Volumes:   volumeMap(pod),
@@ -164,6 +181,7 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 		Catalog:     catalog,
 		Environment: translatorEnvironment(env, translator.Images{Frontend: m.frontendImage, Backend: m.backendImage}),
 		GPUDevices:  gpuDevices,
+		ProfileID:   selection.ProfileID,
 		PodIdentity: pod.Name,
 	})
 	if err != nil {
@@ -482,4 +500,12 @@ func arrayIndex(segment string) (int, bool) {
 		return 0, false
 	}
 	return index, true
+}
+
+// offeredProfiles renders the catalog's identities for a denial.
+func offeredProfiles(ids []string) string {
+	if len(ids) == 0 {
+		return "none (the catalog is empty)"
+	}
+	return strings.Join(ids, ", ")
 }

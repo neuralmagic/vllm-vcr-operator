@@ -10,4 +10,7 @@ const (
 	// EnvironmentValidatorPath is the validating admission path for
 	// VcrGpuClusters.
 	EnvironmentValidatorPath = "/validate-vcr-opendatahub-io-v1alpha1-vcrgpucluster"
+
+	// ProfileValidatorPath is the validating admission path for VcrGpuProfiles.
+	ProfileValidatorPath = "/validate-vcr-opendatahub-io-v1alpha1-vcrgpuprofile"
 )

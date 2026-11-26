@@ -117,6 +117,22 @@ func NewCatalog(candidates []Candidate) (*Catalog, error) {
 	return catalog, nil
 }
 
+// IDs returns the profile identities the catalog offers, sorted.
+//
+// It exists for denial messages: when a namespace asks for an identity the catalog does
+// not carry, the useful answer is the list of identities it does carry.
+func (c *Catalog) IDs() []string {
+	ids := make([]string, 0, len(c.entries))
+	for _, entry := range c.entries {
+		if entry.candidate.Metadata == nil {
+			continue
+		}
+		ids = append(ids, entry.candidate.Metadata.ID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // Candidates returns the catalog entries in the order they were supplied,
 // including rejected candidates.
 func (c *Catalog) Candidates() []Candidate {
@@ -292,7 +308,11 @@ func (r Requirements) describe() string {
 	if revision == "" {
 		revision = "unpinned"
 	}
-	return fmt.Sprintf("model %q (revision %q) on %s x%d", r.Model, revision, r.GPUType, r.GPUCount)
+	requested := ""
+	if r.ProfileID != "" {
+		requested = fmt.Sprintf(" (profile %q requested by the namespace)", r.ProfileID)
+	}
+	return fmt.Sprintf("model %q (revision %q) on %s x%d%s", r.Model, revision, r.GPUType, r.GPUCount, requested)
 }
 
 // matchRequirements evaluates every compatibility criterion and returns the
@@ -305,6 +325,11 @@ func matchRequirements(m *Metadata, req Requirements) (reasons []string, score i
 			return
 		}
 		reasons = append(reasons, fmt.Sprintf(format, args...))
+	}
+
+	if req.ProfileID != "" {
+		check(m.ID == req.ProfileID,
+			"profile.id %q does not match the requested profile %q", m.ID, req.ProfileID)
 	}
 
 	check(m.Model.Name == req.Model,
