@@ -1,0 +1,118 @@
+# Cluster acceptance suite: `make test-cluster` on a two-node kind cluster.
+#
+# This is the specification's primary acceptance interface — an unchanged
+# GPU-requesting vLLM workload served on a CPU-only cluster, with the real operator
+# binaries, a real kubelet, and a real device-plugin registration (test/cluster/
+# README.md). It is deliberately not part of ci.yaml: it builds six images, starts a
+# cluster, installs the operator with webhook certificates, and takes minutes.
+#
+# Opt-in, on purpose:
+#   - on a pull request: add the `test/cluster` label (a maintainer's decision to
+#     spend the time),
+#   - or dispatch this workflow manually against any ref.
+#
+# VCR_CLUSTER_REQUIRED=1 turns the suite's skip into a failure. A job that claims to
+# run the acceptance suite must not report green because a prerequisite was missing;
+# that is exactly the signal the variable exists for.
+name: cluster-e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to test (the default is the ref this run was dispatched on)"
+        required: false
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cluster-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26"
+  # Pinned: the cluster the suite runs against is part of what it establishes, so it
+  # must not change under it. kubectl tracks the envtest Kubernetes line (1.34.x) in
+  # Makefile's ENVTEST_K8S_VERSION.
+  KIND_VERSION: v0.32.0
+  KUBECTL_VERSION: v1.34.1
+
+jobs:
+  cluster:
+    name: kind cluster acceptance suite
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'test/cluster'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A labelled pull request is tested at its merge result, which is what a
+          # pre-submit gate has to pass; a dispatch can name any ref.
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: install kind and kubectl
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+
+          curl -fsSLo "$workdir/kind" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          curl -fsSLo "$workdir/kind.sha256sum" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64.sha256sum"
+          (cd "$workdir" && sha256sum --check --quiet kind.sha256sum)
+          sudo install -m 0755 "$workdir/kind" /usr/local/bin/kind
+
+          curl -fsSLo "$workdir/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          curl -fsSLo "$workdir/kubectl.sha256" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256"
+          (cd "$workdir" && echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check --quiet)
+          sudo install -m 0755 "$workdir/kubectl" /usr/local/bin/kubectl
+
+          kind version
+          kubectl version --client
+
+      - name: create the two-node cluster
+        # One control-plane node and one worker: only the worker is labelled as a
+        # simulation node, so a Pod landing on the control plane is a visible
+        # placement bug instead of a hidden one.
+        run: hack/kind-up.sh
+
+      - name: build and load the images
+        # The operator images and the test-only runtime doubles. The suite skips
+        # without them, which is why VCR_CLUSTER_REQUIRED below is set.
+        run: hack/images.sh --build --stub --load
+
+      - name: cluster acceptance suite
+        env:
+          VCR_CLUSTER_REQUIRED: "1"
+        run: make test-cluster
+
+      - name: cluster state on failure
+        if: failure()
+        run: |
+          set -x
+          kubectl get nodes -o wide || true
+          kubectl get pods -A -o wide || true
+          kubectl get vcrgpuclusters,vcrgpuprofiles -A -o yaml || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -50 || true
+
+      - name: upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-artifacts
+          path: test/cluster/_artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: delete the cluster
+        # The runner is disposable, but deleting the cluster keeps a local
+        # reproduction of this run honest.
+        if: always()
+        run: hack/kind-up.sh --delete

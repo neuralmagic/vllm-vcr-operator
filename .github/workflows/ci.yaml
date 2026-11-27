@@ -1,6 +1,14 @@
-# CI for vllm-vcr-operator: build/vet/unit tests, the envtest acceptance suite,
-# and manifest verification. Kept small on purpose: heavyweight E2E (real
-# cluster, real recorded profiles) is not runnable here.
+# Pre-submit gate for vllm-vcr-operator.
+#
+# The same set runs before a merge (on every pull request) and after one (on main),
+# so a merge cannot land with a check that only ever runs on branches. Everything
+# here is cluster-free: no registry, no GPU, no recorded profile images. The one
+# suite that needs a cluster — `make test-cluster` on kind — is opt-in in
+# cluster-e2e.yaml, because it takes minutes and a container runtime.
+#
+# The checks are the ones CONTRIBUTING.md promises: gofmt, build, vet, unit tests,
+# the envtest acceptance suite, the manifest checks, plus the race detector, a
+# tidy go.mod, and the container images the release publishes.
 name: ci
 
 on:
@@ -13,18 +21,28 @@ on:
 permissions:
   contents: read
 
+# One run per ref: a new push to a pull request cancels the run it superseded
+# instead of paying for both. main is never cancelled, so its record stays whole.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   GO_VERSION: "1.26"
   # Pinned tool versions: manifests and CRDs are generated, so the generator is
-  # part of the contract.
+  # part of the contract. SETUP_ENVTEST_VERSION tracks the pinned
+  # sigs.k8s.io/controller-runtime release; an unpinned `@latest` here would let the
+  # acceptance suite change under a green build.
   CONTROLLER_GEN_VERSION: v0.16.5
   KUSTOMIZE_VERSION: v5.8.1
   YQ_VERSION: v4.53.3
+  SETUP_ENVTEST_VERSION: v0.25.3
 
 jobs:
   build:
     name: build, vet, unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -47,10 +65,54 @@ jobs:
         # make test-unit excludes test/e2e (needs envtest assets) and test/spike
         # (needs real images).
         run: make test-unit
+      - name: go.mod and go.sum are tidy
+        # A dependency added by hand and never tidied builds here but breaks the
+        # next `go mod tidy`, so the drift is caught at the change that caused it.
+        run: |
+          go mod tidy
+          if ! git diff --exit-code -- go.mod go.sum; then
+            echo "go.mod/go.sum are not tidy: run 'go mod tidy' and commit the result" >&2
+            exit 1
+          fi
+
+  race:
+    name: unit tests under the race detector
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: race detector
+        # The supervisor runs concurrent probes, process supervision, and a health
+        # endpoint, and admission serves requests concurrently. A data race there
+        # is invisible to a plain `go test` run.
+        run: make test-race
+
+  dco:
+    name: every commit is signed off
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The gate reads a commit range, so it needs the history, not one commit.
+          fetch-depth: 0
+      - name: Developer Certificate of Origin
+        env:
+          # A pull request is checked from its base to its head; a push from the ref
+          # it replaced. Fork pull requests are checked the same way: this needs no
+          # token beyond the read-only checkout.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: hack/verify-dco.sh --base "$BASE_SHA" --head "$HEAD_SHA"
 
   generated:
     name: generated files are current
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -61,8 +123,8 @@ jobs:
         run: go install sigs.k8s.io/controller-tools/cmd/controller-gen@${CONTROLLER_GEN_VERSION}
       - name: regenerate
         run: |
-          controller-gen object:headerFile="" paths="./..."
-          controller-gen crd paths="./..." output:crd:dir=config/crd/bases
+          "$(go env GOPATH)/bin/controller-gen" object:headerFile="" paths="./..."
+          "$(go env GOPATH)/bin/controller-gen" crd paths="./..." output:crd:dir=config/crd/bases
       - name: fail on drift
         run: |
           if ! git diff --exit-code; then
@@ -73,6 +135,7 @@ jobs:
   test-e2e:
     name: envtest acceptance suite
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -80,10 +143,14 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
       - name: install setup-envtest
-        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@${SETUP_ENVTEST_VERSION}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: envtest suite
-        # test/e2e lands with its own ticket; until then this job proves the
-        # rest of the pipeline is green instead of failing on a missing package.
+        # The suite needs a real API server and the real webhook certificates, which
+        # setup-envtest provides. test/e2e lands with its own ticket; until then this
+        # job proves the rest of the pipeline is green instead of failing on a
+        # missing package.
         run: |
           if [ -d test/e2e ]; then
             make test-e2e
@@ -94,6 +161,7 @@ jobs:
   manifests:
     name: manifests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -123,3 +191,42 @@ jobs:
         run: |
           make manifests
           git diff --exit-code -- config/crd
+
+  images:
+    name: container images build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # The release publishes these three images on a tag. Building them here, with
+      # the same buildx path and no push, is what stops a broken Dockerfile or a new
+      # binary dependency from being discovered at release time.
+      - name: manager
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=manager
+          cache-to: type=gha,mode=max,scope=manager
+      - name: device plugin
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.device-plugin
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=device-plugin
+          cache-to: type=gha,mode=max,scope=device-plugin
+      - name: supervisor
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.supervisor
+          platforms: linux/amd64
+          target: supervisor
+          push: false
+          cache-from: type=gha,scope=supervisor
+          cache-to: type=gha,mode=max,scope=supervisor

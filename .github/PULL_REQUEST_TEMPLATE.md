@@ -11,6 +11,7 @@
 
 <!-- Commands you ran. Do not claim a suite you did not run. -->
 
+- [ ] Every commit carries `Signed-off-by` (`git commit -s`, `hack/verify-dco.sh`)
 - [ ] `go build ./... && go vet ./... && go test ./...`
 - [ ] `make test-e2e` (or explain why not)
 - [ ] `hack/verify-manifests.sh`

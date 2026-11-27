@@ -414,13 +414,23 @@ done < <(find config hack .github -type f \( -name '*.yaml' -o -name '*.yml' \) 
 ci=.github/workflows/ci.yaml
 if [[ -f "$ci" ]] && yq '.' "$ci" >/dev/null 2>&1; then
   jobs="$(yq -r '.jobs | keys | join(" ")' "$ci")"
-  for want in build test-e2e manifests; do
+  # The pre-submit gate CONTRIBUTING.md promises. A check that quietly disappears
+  # from the workflow is the same as a check nobody runs, so the job list is part of
+  # the contract this script verifies.
+  for want in build race dco test-e2e manifests images; do
     if [[ " $jobs " == *" $want "* ]]; then
       ok "CI job $want"
     else
       fail "CI workflow is missing job $want (have: $jobs)"
     fi
   done
+  # ci.yaml must run on pull requests: that is what makes it a pre-submit gate
+  # rather than a notifier for main.
+  if [[ "$(yq -r 'has("on") and .on | has("pull_request")' "$ci")" == "true" ]]; then
+    ok "CI runs on pull_request"
+  else
+    fail "CI workflow does not run on pull_request, so it cannot gate a merge"
+  fi
 else
   fail "$ci is missing or is not valid YAML"
 fi

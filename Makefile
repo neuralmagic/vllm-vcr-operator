@@ -61,6 +61,14 @@ check-upstream:
 test-unit:
 	$(GO) test $$($(GO) list ./... | grep -v '/test/e2e' | grep -v '/test/spike')
 
+# test-race runs the same set as test-unit under the race detector. The supervisor
+# probes, supervises processes, and serves a health endpoint concurrently, and
+# admission serves requests concurrently: a data race there is invisible to a plain
+# run.
+.PHONY: test-race
+test-race:
+	$(GO) test -race $$($(GO) list ./... | grep -v '/test/e2e' | grep -v '/test/spike')
+
 .PHONY: test-e2e
 test-e2e:
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(ENVTEST_BIN_DIR) -p path)" \
