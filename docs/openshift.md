@@ -77,12 +77,17 @@ variables, whose defaults are placeholders. An overlay that replaces only the ma
 leaves the device plugin pulling a nonexistent reference, so `DevicePluginReady` stays false
 and admission rejects every workload. Set all four:
 
+`hack/deploy.sh` does this for you: it writes an overlay carrying the manager image *and*
+the three `VCR_*_IMAGE` variables, binds the privileged SCC when it detects OpenShift, applies
+the singleton `VcrGpuCluster`, and with `--profile-image … --smoke-workload` admits one
+GPU-requesting workload and waits for it:
+
 ```bash
-kubectl -n <operator-ns> set env deploy/vllm-vcr-operator-controller-manager \
-  VCR_DEVICE_PLUGIN_IMAGE=<plugin> \
-  VCR_FRONTEND_IMAGE=<frontend> \
-  VCR_BACKEND_IMAGE=<simulator>
+hack/deploy.sh --operator-image <manager> --profile-image <profile> --smoke-workload
 ```
+
+Everything it applies is the same API on OpenShift and on plain Kubernetes; only the SCC
+binding is OpenShift-specific, and it is skipped automatically elsewhere.
 
 Webhook certificates: with cert-manager, `cainjector` fills `caBundle` on **every** webhook
 entry. Without it, the CA must be published to every entry as well — the validating
