@@ -66,13 +66,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-kube=(kubectl)
-on_openshift=false
-if command -v oc >/dev/null && oc get clusterversion version >/dev/null 2>&1; then
-  on_openshift=true
-  kube=(oc)
+# is_openshift is the only platform branch in this script. Everything else it applies is the
+# same on OpenShift and on vanilla Kubernetes.
+is_openshift() {
+  command -v oc >/dev/null 2>&1 && oc get clusterversion version >/dev/null 2>&1
+}
+
+if is_openshift; then
+  platform="OpenShift"
+else
+  platform="Kubernetes"
 fi
-echo "platform: $( $on_openshift && echo OpenShift || echo Kubernetes )"
+echo "platform: $platform"
 
 # The overlay carries both the manager image and the three images the operator injects.
 overlay=$(mktemp -d)
@@ -112,14 +117,30 @@ trap 'rm -rf "$overlay" "$staged"' EXIT
 
 if $dry_run; then
   kubectl kustomize "$staged" >/dev/null
-  echo "overlay renders; nothing applied"
+  echo "overlay renders; nothing applied (would install on $platform)"
   exit 0
+fi
+
+if [[ ${#cert_manager_args[@]} -eq 0 ]]; then
+  if ! kubectl get crd certificates.cert-manager.io >/dev/null 2>&1; then
+    cat >&2 <<'MSG'
+cert-manager is not installed, so nothing would fill the webhook caBundle and the API server
+would reject every VcrGpuCluster and VcrGpuProfile. Either install it:
+
+  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+  kubectl -n cert-manager wait --for=condition=Available deploy/cert-manager-cainjector deploy/cert-manager-webhook --timeout=300s
+
+or re-run with --no-cert-manager after publishing the CA yourself (see hack/install.sh).
+MSG
+    exit 1
+  fi
 fi
 
 "$repo_root/hack/install.sh" --overlay "$staged" "${cert_manager_args[@]}"
 
 # OpenShift only: the device plugin needs the privileged SCC to reach the kubelet socket.
-if $on_openshift && ! $skip_scc; then
+# Vanilla Kubernetes has no SCC; Pod Security Admission levels are set by install.sh.
+if is_openshift && ! $skip_scc; then
   sa="${namespace}:vllm-vcr-device-plugin"
   echo "binding SCC privileged to ServiceAccount ${sa}"
   oc adm policy add-scc-to-user privileged -z vllm-vcr-device-plugin -n "$namespace" >/dev/null
