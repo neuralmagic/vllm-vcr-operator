@@ -14,39 +14,88 @@ import (
 	"github.com/neuralmagic/vllm-vcr-operator/internal/registry"
 )
 
+// failure is one reason a configured profile could not be published, together with
+// whether a later attempt can fix it. Keeping the retryability beside its reason
+// stops the two travelling as separate parallel slices.
+type failure struct {
+	// reason names the setting and the problem, never a credential value.
+	reason string
+	// retryable is true when a later attempt can succeed without a spec change: a
+	// registry outage or an unreadable pull Secret. False means only a different
+	// spec can fix it.
+	retryable bool
+}
+
 // profileReconciliation is the outcome of reconciling spec.profiles.
 type profileReconciliation struct {
 	// published is the status.profiles content, in spec order so an unchanged
 	// reconcile produces an identical status.
 	published []vcrv1alpha1.ResolvedProfile
-	// retry is true when at least one entry failed for a reason a later attempt
-	// can fix without a spec change: a registry outage or an unreadable pull
-	// Secret.
-	retry bool
-	// unusable lists per-image reasons that only a spec change can fix.
-	unusable []string
-	// unavailable lists per-image reasons that are retried automatically.
-	unavailable []string
+	// failures holds one entry per profile image that could not be published, in
+	// spec order.
+	failures []failure
 	// configured is the number of profile images in the spec.
 	configured int
+}
+
+// fail records one profile that could not be published.
+func (p *profileReconciliation) fail(reason string, retryable bool) {
+	p.failures = append(p.failures, failure{reason: reason, retryable: retryable})
+}
+
+// unusable returns the reasons only a spec change can fix.
+func (p profileReconciliation) unusable() []string { return p.reasons(false) }
+
+// unavailable returns the reasons that are retried automatically.
+func (p profileReconciliation) unavailable() []string { return p.reasons(true) }
+
+// retry reports whether any failure is retryable, which is what asks the work
+// queue for another reconcile.
+func (p profileReconciliation) retry() bool {
+	for _, f := range p.failures {
+		if f.retryable {
+			return true
+		}
+	}
+	return false
+}
+
+// detail joins every failure reason in spec order, so the message names everything
+// that is wrong rather than only the first problem.
+func (p profileReconciliation) detail() string {
+	reasons := make([]string, 0, len(p.failures))
+	for _, f := range p.failures {
+		reasons = append(reasons, f.reason)
+	}
+	return strings.Join(reasons, "; ")
+}
+
+func (p profileReconciliation) reasons(retryable bool) []string {
+	reasons := make([]string, 0, len(p.failures))
+	for _, f := range p.failures {
+		if f.retryable == retryable {
+			reasons = append(reasons, f.reason)
+		}
+	}
+	return reasons
 }
 
 // condition renders the ProfilesReconciled condition.
 func (p profileReconciliation) condition() metav1.Condition {
 	switch {
-	case len(p.unusable) > 0:
+	case len(p.unusable()) > 0:
 		// A metadata contract violation outranks a retryable failure: the catalog
 		// cannot be completed until the configured image changes.
 		return metav1.Condition{
 			Status:  metav1.ConditionFalse,
 			Reason:  vcrv1alpha1.ReasonProfileUnusable,
-			Message: joinReasons(p.unusable, p.unavailable),
+			Message: p.detail(),
 		}
-	case len(p.unavailable) > 0:
+	case len(p.unavailable()) > 0:
 		return metav1.Condition{
 			Status:  metav1.ConditionFalse,
 			Reason:  vcrv1alpha1.ReasonRegistryUnavailable,
-			Message: joinReasons(p.unavailable, nil),
+			Message: p.detail(),
 		}
 	case p.configured == 0:
 		return metav1.Condition{
@@ -63,14 +112,6 @@ func (p profileReconciliation) condition() metav1.Condition {
 			Message: fmt.Sprintf("%d profile image(s) reconciled: admission pins the published digests", len(p.published)),
 		}
 	}
-}
-
-// joinReasons combines per-image reasons, keeping spec order.
-func joinReasons(primary, secondary []string) string {
-	reasons := make([]string, 0, len(primary)+len(secondary))
-	reasons = append(reasons, primary...)
-	reasons = append(reasons, secondary...)
-	return strings.Join(reasons, "; ")
 }
 
 // reconcileProfiles resolves every configured profile image into a published
@@ -90,7 +131,7 @@ func (r *VcrGpuClusterReconciler) reconcileProfiles(ctx context.Context, env *vc
 		reference, err := registry.JoinReference(env.Spec.ProfileRegistry, source.Image)
 		if err != nil {
 			reason := err.Error()
-			result.unusable = append(result.unusable, reason)
+			result.fail(reason, false)
 			result.published = append(result.published, unusableProfile(source.Image, "", reason))
 			candidates = append(candidates, profile.Candidate{Image: source.Image, Message: reason})
 			continue
@@ -102,56 +143,64 @@ func (r *VcrGpuClusterReconciler) reconcileProfiles(ctx context.Context, env *vc
 		if _, duplicate := seen[source.Image]; duplicate {
 			// status.profiles is keyed by image, so a duplicate image would be a
 			// duplicate map key. Report it instead of publishing one of them.
-			result.unusable = append(result.unusable, fmt.Sprintf(
-				"profile image %q is listed more than once: status.profiles is keyed by image", source.Image))
+			result.fail(fmt.Sprintf(
+				"profile image %q is listed more than once: status.profiles is keyed by image", source.Image), false)
 			continue
 		}
 		seen[source.Image] = struct{}{}
 
-		entry, candidate, reason, retryable := r.reconcileProfile(ctx, env, source)
-		result.published = append(result.published, entry)
-		candidates = append(candidates, candidate)
-		switch {
-		case reason == "":
-		case retryable:
-			result.retry = true
-			result.unavailable = append(result.unavailable, reason)
-		default:
-			result.unusable = append(result.unusable, reason)
+		outcome := r.reconcileProfile(ctx, env, source)
+		result.published = append(result.published, outcome.entry)
+		candidates = append(candidates, outcome.candidate)
+		if outcome.failure != nil {
+			result.failures = append(result.failures, *outcome.failure)
 		}
 	}
 
 	if _, err := profile.NewCatalog(candidates); err != nil {
-		result.unusable = append(result.unusable, err.Error())
+		result.fail(err.Error(), false)
 	}
 	return result
 }
 
-// reconcileProfile resolves one configured profile image. It returns the entry to
-// publish, the candidate for the catalog, a reason when the entry is unusable,
-// and whether the failure is retryable.
+// outcome is what reconciling one profile image produced: the entry to publish, the
+// catalog candidate, and the failure when the entry is not usable.
+type outcome struct {
+	entry     vcrv1alpha1.ResolvedProfile
+	candidate profile.Candidate
+	// failure is nil when the entry was resolved and can be selected.
+	failure *failure
+}
+
+// failedOutcome renders the outcome for a profile image that cannot be published.
+func failedOutcome(entry vcrv1alpha1.ResolvedProfile, candidate profile.Candidate, reason string, retryable bool) outcome {
+	return outcome{entry: entry, candidate: candidate, failure: &failure{reason: reason, retryable: retryable}}
+}
+
+// reconcileProfile resolves one configured profile image.
 func (r *VcrGpuClusterReconciler) reconcileProfile(
 	ctx context.Context,
 	env *vcrv1alpha1.VcrGpuCluster,
 	source vcrv1alpha1.ProfileSource,
-) (vcrv1alpha1.ResolvedProfile, profile.Candidate, string, bool) {
+) outcome {
 	if prior, ok := previouslyReconciled(env.Status.Profiles, source.Image); ok {
 		// Republish the reconciled entry verbatim. Its digest is already pinned,
 		// so re-resolving a tag could only change the profile a running
 		// simulation was admitted with, and it would cost a registry round trip.
 		if metadata, err := profile.Parse([]byte(prior.Metadata)); err == nil {
-			return prior, profile.Candidate{
+			return outcome{entry: prior, candidate: profile.Candidate{
 				Image:    prior.Image,
 				Digest:   prior.Digest,
 				Metadata: metadata,
-			}, "", false
+			}}
 		}
 	}
 
 	credentials, err := r.pullCredentials(ctx, env, source)
 	if err != nil {
 		reason := fmt.Sprintf("profile image %q: %s", source.Image, err)
-		return unusableProfile(source.Image, "", reason), profile.Candidate{Image: source.Image, Message: reason}, reason, true
+		return failedOutcome(unusableProfile(source.Image, "", reason),
+			profile.Candidate{Image: source.Image, Message: reason}, reason, true)
 	}
 
 	resolved, err := r.NewResolver(registry.Options{Credentials: credentials.authenticate}).Resolve(ctx, source.Image)
@@ -160,7 +209,8 @@ func (r *VcrGpuClusterReconciler) reconcileProfile(
 		// registries flap and pull Secrets get created. The resolver guarantees
 		// no credential material in the error.
 		reason := err.Error()
-		return unusableProfile(source.Image, "", reason), profile.Candidate{Image: source.Image, Message: reason}, reason, true
+		return failedOutcome(unusableProfile(source.Image, "", reason),
+			profile.Candidate{Image: source.Image, Message: reason}, reason, true)
 	}
 
 	metadata, err := profile.Parse(resolved.Metadata)
@@ -169,20 +219,23 @@ func (r *VcrGpuClusterReconciler) reconcileProfile(
 		// it; the configured image has to change. Metadata is not published
 		// because status.profiles carries only validated documents.
 		reason := fmt.Sprintf("profile image %q: %s", source.Image, err)
-		return unusableProfile(source.Image, resolved.Digest, reason),
-			profile.Candidate{Image: source.Image, Digest: resolved.Digest, Message: reason}, reason, false
+		return failedOutcome(unusableProfile(source.Image, resolved.Digest, reason),
+			profile.Candidate{Image: source.Image, Digest: resolved.Digest, Message: reason}, reason, false)
 	}
 
-	return vcrv1alpha1.ResolvedProfile{
+	return outcome{
+		entry: vcrv1alpha1.ResolvedProfile{
 			Image:        source.Image,
 			Digest:       resolved.Digest,
 			Metadata:     string(resolved.Metadata),
 			ReconciledAt: metav1.NewTime(r.Now()),
-		}, profile.Candidate{
+		},
+		candidate: profile.Candidate{
 			Image:    source.Image,
 			Digest:   resolved.Digest,
 			Metadata: metadata,
-		}, "", false
+		},
+	}
 }
 
 // unusableProfile renders a published entry for a profile that cannot be used.
@@ -215,6 +268,17 @@ func devicePluginCondition(state DevicePluginState, reconciler *DevicePluginReco
 			len(state.ExcludedNodes), names.SyntheticResourceName, strings.Join(state.ExcludedNodes, ", "))
 	}
 
+	if state.Desired == 0 {
+		// A freshly created DaemonSet reports no status at all. Saying "0 of 0
+		// node(s) ready" claims a fact about the cluster that has not been observed
+		// yet; name the actual state instead.
+		return metav1.Condition{
+			Status: metav1.ConditionFalse,
+			Reason: vcrv1alpha1.ReasonDaemonSetNotReady,
+			Message: fmt.Sprintf("device plugin DaemonSet %s reports no scheduled node yet%s",
+				location, exclusion),
+		}
+	}
 	if state.Desired > 0 && state.Ready == state.Desired {
 		return metav1.Condition{
 			Status: metav1.ConditionTrue,

@@ -24,9 +24,8 @@ func resolveChatTemplate(p *parser, raw string) *Rejection {
 		cfg.ChatTemplate.SHA256 = digestOf(raw)
 		return nil
 	}
-	containerPath, rej := p.resolvePath(raw)
+	containerPath, rej := p.resolvePath(raw, SettingChatTemplate)
 	if rej != nil {
-		rej.Setting = string(SettingChatTemplate)
 		return rej
 	}
 	content, rej := p.files.read(containerPath, SettingChatTemplate)

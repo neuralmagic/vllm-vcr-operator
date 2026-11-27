@@ -18,6 +18,7 @@ import (
 	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
 	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
 	"github.com/neuralmagic/vllm-vcr-operator/internal/profile"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/pullsecrets"
 	"github.com/neuralmagic/vllm-vcr-operator/internal/translator"
 )
 
@@ -127,17 +128,6 @@ func translatorEnvironment(env *vcrv1alpha1.VcrGpuCluster, images translator.Ima
 		sizing.Provisioner = *env.Spec.Runtime.Provisioner
 	}
 
-	pullSecrets := make([]string, 0, len(env.Spec.ImagePullSecrets))
-	for _, reference := range env.Spec.ImagePullSecrets {
-		pullSecrets = append(pullSecrets, reference.Name)
-	}
-	profilePullSecrets := make(map[string]string, len(env.Spec.Profiles))
-	for _, source := range env.Spec.Profiles {
-		if source.PullSecretName != "" {
-			profilePullSecrets[source.Image] = source.PullSecretName
-		}
-	}
-
 	return translator.Environment{
 		GPUType:              env.Spec.GPUType,
 		DevicesPerNode:       env.Spec.DevicesPerNode,
@@ -147,8 +137,7 @@ func translatorEnvironment(env *vcrv1alpha1.VcrGpuCluster, images translator.Ima
 		Sizing:               sizing,
 		NodeSelector:         env.Spec.NodeSelection.NodeSelector,
 		Tolerations:          env.Spec.NodeSelection.Tolerations,
-		PullSecrets:          pullSecrets,
-		ProfilePullSecrets:   profilePullSecrets,
+		PullSecrets:          pullsecrets.FromSpec(env.Spec),
 	}
 }
 
@@ -200,14 +189,14 @@ func (m *PodMutator) profileSelection(ctx context.Context, namespace string) (Vc
 		selection := listed.Items[0]
 		return VcrGpuProfileSelection{Name: selection.Name, ProfileID: selection.Spec.Profile}, nil
 	default:
-		names := make([]string, len(listed.Items))
+		selections := make([]string, len(listed.Items))
 		for i, item := range listed.Items {
-			names[i] = item.Name
+			selections[i] = item.Name
 		}
-		sort.Strings(names)
+		sort.Strings(selections)
 		return VcrGpuProfileSelection{}, operatorFailure(
 			"namespace %q has %d VcrGpuProfiles (%s): exactly one profile selection is allowed per namespace",
-			namespace, len(listed.Items), strings.Join(names, ", "))
+			namespace, len(listed.Items), strings.Join(selections, ", "))
 	}
 }
 

@@ -392,13 +392,16 @@ func withoutConfigFlag(tokens []string) []string {
 
 // resolvePath resolves a path argument against the container's working
 // directory, which is the only way a relative path becomes absolute.
-func (p *parser) resolvePath(raw string) (string, *Rejection) {
+//
+// The caller names the setting, because only it knows which flag or variable the
+// path came from: a rejection that cannot be attributed is not actionable.
+func (p *parser) resolvePath(raw string, setting Setting) (string, *Rejection) {
 	if path.IsAbs(raw) {
 		return raw, nil
 	}
 	if p.inv.Container.WorkingDir == "" {
 		return "", &Rejection{
-			Setting: "",
+			Setting: string(setting),
 			Value:   raw,
 			Reason:  "a relative path is used but the container sets no working directory, so the file cannot be located",
 		}

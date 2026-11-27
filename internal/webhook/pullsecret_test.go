@@ -14,7 +14,7 @@ import (
 
 	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
 	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
-	"github.com/neuralmagic/vllm-vcr-operator/internal/webhook"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/projection"
 )
 
 const (
@@ -95,11 +95,11 @@ func TestPrivateProfileSecretIsProjected(t *testing.T) {
 	if got := projected.Labels[names.ManagedByLabel]; got != names.OperatorName {
 		t.Errorf("projected Secret label %s = %q, want %q", names.ManagedByLabel, got, names.OperatorName)
 	}
-	if got, want := projected.Annotations[webhook.AppliedToAnnotation], workloadNamespace+"/"+pod.Name; got != want {
-		t.Errorf("annotation %s = %q, want %q", webhook.AppliedToAnnotation, got, want)
+	if got, want := projected.Annotations[projection.AppliedToAnnotation], workloadNamespace+"/"+pod.Name; got != want {
+		t.Errorf("annotation %s = %q, want %q", projection.AppliedToAnnotation, got, want)
 	}
-	if projected.Annotations[webhook.AppliedAtAnnotation] == "" {
-		t.Errorf("annotation %s is not set", webhook.AppliedAtAnnotation)
+	if projected.Annotations[projection.AppliedAtAnnotation] == "" {
+		t.Errorf("annotation %s is not set", projection.AppliedAtAnnotation)
 	}
 
 	// The projected payload is the merged source document, not a re-encoded or
@@ -669,5 +669,56 @@ func TestProjectedNameFollowsTheProjectedCredentials(t *testing.T) {
 	ghcrCopy := admit(secondImage)
 	if quayCopy == ghcrCopy {
 		t.Errorf("both profiles reference one projected Secret %q although they are served from different registries", quayCopy)
+	}
+}
+
+// TestProfilePullSecretIsFoundThroughTheProfileRegistry is the regression test for
+// a real failure: the override was keyed by the spec's spelling while the
+// translator looks it up by the reference resolved against spec.profileRegistry. A
+// cluster that names a profile registry therefore lost the override and fell back
+// to the environment-wide candidates, pulling the private profile anonymously.
+func TestProfilePullSecretIsFoundThroughTheProfileRegistry(t *testing.T) {
+	const registry = "ghcr.io/acme/vllm-vcr-profiles"
+	env := testEnvironment(t, func(e *vcrv1alpha1.VcrGpuCluster) {
+		e.Spec.ImagePullSecrets = []vcrv1alpha1.LocalSecretReference{{Name: workloadPullSecret}}
+		// The spec names what to look for inside the registry; status.profiles, and
+		// therefore the selected image, carries the resolved reference.
+		e.Spec.ProfileRegistry = registry
+		e.Spec.Profiles[0].Image = "qwen3-0.6b-h200-tp1-bf16"
+		e.Spec.Profiles[0].PullSecretName = profilePullSecret
+		for i := range e.Status.Profiles {
+			e.Status.Profiles[i].Image = registry + ":qwen3-0.6b-h200-tp1-bf16"
+		}
+	})
+	c := testClient(t, env,
+		dockerConfigSecret(workloadPullSecret, map[string]map[string]string{
+			"quay.io": {"username": "wide", "password": "wide-value"},
+		}),
+		dockerConfigSecret(profilePullSecret, map[string]map[string]string{
+			"ghcr.io": {"username": "profile", "password": "profile-value"},
+		}),
+	)
+	mutator := testMutator(t, c)
+	pod := testPod()
+
+	resp := mutator.Admit(t.Context(), admissionRequest(t, admissionv1.Create, pod))
+	if !resp.Allowed {
+		t.Fatalf("GPU Pod denied: %s", messageOf(resp))
+	}
+	mutated := applyPatch(t, pod, resp.Patch)
+
+	projected := &corev1.Secret{}
+	key := types.NamespacedName{Namespace: workloadNamespace, Name: projectedPullSecretName(t, mutated)}
+	if err := c.Get(t.Context(), key, projected); err != nil {
+		t.Fatalf("projected Secret %s: %v", key, err)
+	}
+	var payload struct {
+		Auths map[string]json.RawMessage `json:"auths"`
+	}
+	if err := json.Unmarshal(projected.Data[corev1.DockerConfigJsonKey], &payload); err != nil {
+		t.Fatalf("projected payload is not a docker config document: %v", err)
+	}
+	if _, ok := payload.Auths["ghcr.io"]; !ok {
+		t.Errorf("projected payload does not carry the profile's registry entry: %v", payload.Auths)
 	}
 }

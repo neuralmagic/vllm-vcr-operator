@@ -60,12 +60,7 @@ func (v *ProfileValidator) Validate(ctx context.Context, req *admissionv1.Admiss
 	if err := decodeObject(req.Object.Raw, submitted, "VcrGpuProfile"); err != nil {
 		return denied(err.Error())
 	}
-	if submitted.Namespace == "" {
-		submitted.Namespace = req.Namespace
-	}
-	if submitted.Name == "" {
-		submitted.Name = req.Name
-	}
+	resolveIdentity(&submitted.ObjectMeta, req)
 
 	existing := &vcrv1alpha1.VcrGpuProfileList{}
 	if err := v.client.List(ctx, existing, client.InNamespace(submitted.Namespace)); err != nil {

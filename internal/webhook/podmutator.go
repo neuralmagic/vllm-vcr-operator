@@ -99,10 +99,10 @@ func (m *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 // with the JSON patch that installs the simulated runtime layout.
 func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionRequest) *admissionv1.AdmissionResponse {
 	log := ctrl.LoggerFrom(ctx)
-	dryRunRequest := req.DryRun != nil && *req.DryRun
 	if req == nil {
 		return operatorDenied("the admission request is empty")
 	}
+	dryRunRequest := req.DryRun != nil && *req.DryRun
 	// Only creation injects the runtime layout; updates (including the ones a
 	// controller makes to a Pod it owns) are left alone.
 	if req.Operation != admissionv1.Create {
@@ -115,12 +115,7 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 	}
 	// A generateName-only Pod has no name yet; the request carries the resolved
 	// identity, which is what provenance and the projected pull secret use.
-	if pod.Name == "" {
-		pod.Name = req.Name
-	}
-	if pod.Namespace == "" {
-		pod.Namespace = req.Namespace
-	}
+	resolveIdentity(&pod.ObjectMeta, req)
 
 	if !runtime.RequestsSyntheticDevice(pod) {
 		return allowed()
@@ -203,8 +198,7 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 	// Pull-secret projection is the only side effect of admission, and only a real
 	// request may cause it. The projected name is derived from the payload, so a
 	// dry-run request produces the same patch without creating anything.
-	dryRun := req.DryRun != nil && *req.DryRun
-	projected, err := m.projectPullSecrets(ctx, pod, admitted, dryRun)
+	projected, err := m.projectPullSecrets(ctx, pod, admitted, dryRunRequest)
 	if err != nil {
 		denial := operatorFailure("%v", err)
 		m.recordOperatorProblem(env, log, denial.detail)
@@ -223,7 +217,7 @@ func (m *PodMutator) Admit(ctx context.Context, req *admissionv1.AdmissionReques
 	if len(patch) == 0 {
 		return allowed()
 	}
-	m.recordInjection(log, pod, admitted, dryRun, len(patch))
+	m.recordInjection(log, pod, admitted, dryRunRequest, len(patch))
 	response := allowedWithPatch(patch, admissionv1.PatchTypeJSONPatch)
 	response.Warnings = admitted.Warnings
 	return response

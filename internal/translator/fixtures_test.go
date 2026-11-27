@@ -111,7 +111,7 @@ func testEnvironment() translator.Environment {
 		Tolerations: []corev1.Toleration{
 			{Key: "vcr.opendatahub-io/simulation", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 		},
-		PullSecrets: []string{"profile-pull"},
+		PullSecrets: plan.PullSecrets{Candidates: []string{"profile-pull"}},
 	}
 }
 

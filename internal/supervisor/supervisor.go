@@ -224,14 +224,19 @@ func New(cfg Config) (*Supervisor, error) {
 	if cfg.HealthAddress == "" {
 		cfg.HealthAddress = DefaultHealthAddress
 	}
-	switch {
-	case cfg.BackendLossGrace < 0:
+	// The two budgets default independently: one switch over both would let the
+	// loss-grace default shadow the startup-timeout default, leaving the startup
+	// budget at zero and killing a slow-starting frontend immediately.
+	if cfg.BackendLossGrace < 0 {
 		return nil, fmt.Errorf("supervisor: backend loss grace %s must not be negative", cfg.BackendLossGrace)
-	case cfg.BackendLossGrace == 0:
+	}
+	if cfg.BackendLossGrace == 0 {
 		cfg.BackendLossGrace = DefaultBackendLossGrace
-	case cfg.BackendStartupTimeout < 0:
+	}
+	if cfg.BackendStartupTimeout < 0 {
 		return nil, fmt.Errorf("supervisor: backend startup timeout %s must not be negative", cfg.BackendStartupTimeout)
-	case cfg.BackendStartupTimeout == 0:
+	}
+	if cfg.BackendStartupTimeout == 0 {
 		cfg.BackendStartupTimeout = DefaultBackendStartupTimeout
 	}
 	if cfg.ShutdownTimeout < 0 {

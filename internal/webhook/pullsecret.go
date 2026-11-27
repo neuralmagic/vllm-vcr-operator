@@ -5,29 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/neuralmagic/vllm-vcr-operator/internal/credentials"
-	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/neuralmagic/vllm-vcr-operator/internal/credentials"
 	"github.com/neuralmagic/vllm-vcr-operator/internal/plan"
 	"github.com/neuralmagic/vllm-vcr-operator/internal/projection"
 )
-
-const (
-	// AppliedToAnnotation records which workload a projected pull secret was
-	// created for. The copy carries no owner reference: nothing namespace-local
-	// owns it (the workload's ServiceAccount or Deployment lives in the
-	// controller's manifest), so labels and this annotation identify it instead.
-	AppliedToAnnotation = names.AnnotationPrefix + "applied-to"
-
-	// AppliedAtAnnotation records when the projected copy was created.
-	AppliedAtAnnotation = names.AnnotationPrefix + "applied-at"
-)
-
-// projectedSecretBytes is how much of the source digest is used in the projected
-// Secret name. 64 bits keep names short while making an accidental collision
-// irrelevant; a copy is compared byte for byte before it is reused.
-const projectedSecretBytes = 8
 
 // projectPullSecrets copies the pull credentials the selected profile image needs
 // into the workload namespace and returns the name of the copy to reference.
@@ -74,9 +57,13 @@ func (m *PodMutator) projectPullSecrets(ctx context.Context, pod *corev1.Pod, ad
 	if dryRun {
 		return name, nil
 	}
-	appliedTo := pod.Namespace + "/" + pod.Name
-	if err := projection.Ensure(ctx, m.client, m.reader, pod.Namespace, name, merged, appliedTo,
-		m.now().UTC().Format(time.RFC3339)); err != nil {
+	if err := projection.Ensure(ctx, m.client, m.reader, projection.Copy{
+		Merged:    *merged,
+		Namespace: pod.Namespace,
+		Name:      name,
+		AppliedTo: pod.Namespace + "/" + pod.Name,
+		UpdatedAt: m.now().UTC().Format(time.RFC3339),
+	}); err != nil {
 		return "", err
 	}
 	return name, nil

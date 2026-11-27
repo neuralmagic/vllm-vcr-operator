@@ -79,7 +79,8 @@ const (
 	// admission. It never contains credentials.
 	InjectedAnnotation = AnnotationPrefix + "injected"
 
-	// ProfileAnnotation records the pinned profile image digest and id.
+	// ProfileAnnotation records the pinned profile id: the image is pinned
+	// separately, in ProfileImageAnnotation.
 	ProfileAnnotation = AnnotationPrefix + "profile"
 
 	// ProfileImageAnnotation records the digest-pinned profile image.

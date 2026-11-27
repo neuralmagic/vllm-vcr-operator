@@ -67,9 +67,8 @@ func Resolve(in Invocation) (*Config, error) {
 // applyConfigFileLayer resolves the file named by --config and applies its
 // values with config-file precedence.
 func (p *parser) applyConfigFileLayer(rawPath string) {
-	containerPath, rej := p.resolvePath(rawPath)
+	containerPath, rej := p.resolvePath(rawPath, SettingConfigFile)
 	if rej != nil {
-		rej.Setting = string(SettingConfigFile)
 		p.errs = append(p.errs, *rej)
 		return
 	}

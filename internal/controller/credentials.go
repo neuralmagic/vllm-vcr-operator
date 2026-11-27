@@ -10,6 +10,7 @@ import (
 
 	vcrv1alpha1 "github.com/neuralmagic/vllm-vcr-operator/api/v1alpha1"
 	"github.com/neuralmagic/vllm-vcr-operator/internal/credentials"
+	"github.com/neuralmagic/vllm-vcr-operator/internal/pullsecrets"
 )
 
 // registryCredentials maps a normalized registry host to a pull credential read
@@ -29,21 +30,6 @@ func (c registryCredentials) authenticate(_ context.Context, host string) (authn
 	return authn.Anonymous, nil
 }
 
-// pullSecretNames returns the Secret names that hold credentials for one profile
-// image. A profile-level secret replaces the environment-wide list rather than
-// adding to it, so a single profile can pull from a private registry without
-// changing the credentials every other profile uses.
-func pullSecretNames(env *vcrv1alpha1.VcrGpuCluster, source vcrv1alpha1.ProfileSource) []string {
-	if source.PullSecretName != "" {
-		return []string{source.PullSecretName}
-	}
-	names := make([]string, 0, len(env.Spec.ImagePullSecrets))
-	for _, reference := range env.Spec.ImagePullSecrets {
-		names = append(names, reference.Name)
-	}
-	return names
-}
-
 // pullCredentials reads the pull Secrets that apply to one profile image.
 //
 // Errors name the Secret and the expected key, never a value: a Secret payload
@@ -54,7 +40,9 @@ func (r *VcrGpuClusterReconciler) pullCredentials(
 	source vcrv1alpha1.ProfileSource,
 ) (registryCredentials, error) {
 	credentialsByHost := registryCredentials{}
-	for _, secretName := range pullSecretNames(env, source) {
+	// Which Secrets apply is decided once, in internal/plan.PullSecrets, so this
+	// reconciler and admission cannot disagree about it.
+	for _, secretName := range pullsecrets.FromSpec(env.Spec).For(source.Image).Names {
 		secret := &corev1.Secret{}
 		key := types.NamespacedName{Namespace: r.OperatorNamespace, Name: secretName}
 		if err := r.Get(ctx, key, secret); err != nil {

@@ -529,3 +529,20 @@ func TestGPUInitContainerDeniedAsWorkloadProblem(t *testing.T) {
 		}
 	}
 }
+
+// TestEmptyAdmissionRequestIsDeniedRatherThanPanicking: the mutator documents a
+// denial for an empty request, and a webhook that panics on a malformed one turns a
+// bad request into a broken operator.
+func TestEmptyAdmissionRequestIsDeniedRatherThanPanicking(t *testing.T) {
+	mutator := testMutator(t, testClient(t))
+	resp := mutator.Admit(t.Context(), nil)
+	if resp == nil {
+		t.Fatal("Admit(nil) returned no response")
+	}
+	if resp.Allowed {
+		t.Fatalf("Admit(nil) allowed the request")
+	}
+	if !strings.Contains(resp.Result.Message, "empty") {
+		t.Errorf("message = %q, want it to explain that the request was empty", resp.Result.Message)
+	}
+}

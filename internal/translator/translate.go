@@ -73,14 +73,9 @@ type Environment struct {
 	// on tainted simulation nodes.
 	Tolerations []corev1.Toleration
 
-	// PullSecrets are the environment-wide Secret names required to pull profile
-	// images. Only names are used, never values.
-	PullSecrets []string
-
-	// ProfilePullSecrets overrides PullSecrets per configured profile image
-	// reference (spec.profiles[].pullSecretName). The key is the image reference
-	// as configured, which is what the reconciled catalog reports back.
-	ProfilePullSecrets map[string]string
+	// PullSecrets decides which operator-namespace Secret names are read for the
+	// selected profile image. Only names are used, never values.
+	PullSecrets plan.PullSecrets
 
 	// RuntimeClasses are the container runtime classes that require an
 	// accelerator runtime and are therefore removed. Empty means the default set
@@ -195,7 +190,7 @@ func Translate(req Request) (*plan.Admission, error) {
 		return nil, err
 	}
 
-	pullSecrets, profilePullSecret := pullSecretsFor(env, selection.Image)
+	pullSecrets := env.PullSecrets.For(selection.Image)
 	admission := &plan.Admission{
 		Profile: plan.Profile{ID: selection.ID, Image: selection.Image, Digest: selection.Digest},
 		Model: plan.Model{
@@ -209,8 +204,8 @@ func Translate(req Request) (*plan.Admission, error) {
 		Provisioner:       provisioner,
 		Resources:         env.Sizing,
 		Placement:         placementFor(env),
-		PullSecrets:       pullSecrets,
-		ProfilePullSecret: profilePullSecret,
+		PullSecrets:       pullSecrets.Names,
+		ProfilePullSecret: pullSecrets.Override,
 		Provenance: plan.Provenance{
 			ProfileID:    selection.ID,
 			ProfileImage: plan.Profile{Image: selection.Image, Digest: selection.Digest}.PinnedImage(),

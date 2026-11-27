@@ -10,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/neuralmagic/vllm-vcr-operator/internal/names"
 	"github.com/neuralmagic/vllm-vcr-operator/internal/projection"
 )
 
@@ -86,7 +87,7 @@ func (r *ProjectedSecretReconciler) Reconcile(ctx context.Context) error {
 
 	copies := &corev1.SecretList{}
 	if err := r.Client.List(ctx, copies, client.MatchingLabels{
-		"vcr.opendatahub-io/managed-by": "vllm-vcr-operator",
+		names.ManagedByLabel: names.OperatorName,
 	}); err != nil {
 		return fmt.Errorf("list projected pull Secrets: %w", err)
 	}
@@ -103,12 +104,32 @@ func (r *ProjectedSecretReconciler) Reconcile(ctx context.Context) error {
 		if sources := projection.SourcesOf(secret); len(sources) > 0 {
 			merged, err := projection.Merge(ctx, r.Reader, r.OperatorNamespace, sources,
 				projection.ImageHostOf(secret), projection.ExplicitOf(secret))
-			if err != nil {
-				return fmt.Errorf("refresh projected pull Secret %s/%s: %w", secret.Namespace, secret.Name, err)
-			}
-			if merged != nil {
-				if err := projection.Ensure(ctx, r.Client, r.Reader, secret.Namespace, secret.Name, merged,
-					secret.Annotations[projection.AppliedToAnnotation], r.now().Format(time.RFC3339)); err != nil {
+			switch {
+			case err != nil:
+				// One unreadable or now-ambiguous source must not stall the sweep for
+				// every other copy, which would leave all of them stale forever.
+				r.Log.Error(err, "refreshing a projected pull Secret",
+					"namespace", secret.Namespace, "name", secret.Name)
+			case merged == nil:
+				// The sources no longer carry a credential for this copy's registry, so
+				// the copy is the only place the old credential still exists. Keeping it
+				// would leave a credential the environment no longer sanctions next to a
+				// live Pod; admission rebuilds the copy if a Pod needs it again.
+				if err := r.Client.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+					return fmt.Errorf("delete projected pull Secret %s/%s that no longer projects a credential: %w",
+						secret.Namespace, secret.Name, err)
+				}
+				r.Log.Info("removed a projected pull Secret whose sources no longer carry its credential",
+					"namespace", secret.Namespace, "name", secret.Name)
+				continue
+			default:
+				if err := projection.Ensure(ctx, r.Client, r.Reader, projection.Copy{
+					Merged:    *merged,
+					Namespace: secret.Namespace,
+					Name:      secret.Name,
+					AppliedTo: secret.Annotations[projection.AppliedToAnnotation],
+					UpdatedAt: r.now().Format(time.RFC3339),
+				}); err != nil {
 					return err
 				}
 			}

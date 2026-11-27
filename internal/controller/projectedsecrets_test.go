@@ -160,3 +160,76 @@ func TestForeignSecretsAreIgnored(t *testing.T) {
 		t.Fatalf("a Secret the operator does not manage was removed: %v", err)
 	}
 }
+
+// TestProjectedSecretIsRemovedWhenItsSourcesNoLongerProjectACredential: a source
+// Secret that was rotated or unlabelled may stop carrying an entry for the copy's
+// registry. Keeping the copy would leave the old credential next to a live Pod,
+// which is the leak this reconciler exists to prevent.
+func TestProjectedSecretIsRemovedWhenItsSourcesNoLongerProjectACredential(t *testing.T) {
+	namespace := "workload"
+	copyName := projection.Name([]string{"rotated-away"})
+	source := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: testOperatorNamespace, Name: "rotated-away"},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		Data: map[string][]byte{corev1.DockerConfigJsonKey: []byte(
+			`{"auths":{"quay.io":{"auth":"b2xk"}}}`)},
+	}
+	// The copy is filtered (not an explicit override) to a registry the source no
+	// longer authenticates.
+	stale := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      copyName,
+			Labels:    map[string]string{names.ManagedByLabel: names.OperatorName},
+			Annotations: map[string]string{
+				projection.AppliedSourcesAnnotation:   "rotated-away",
+				projection.AppliedImageHostAnnotation: "ghcr.io",
+				projection.AppliedExplicitAnnotation:  "false",
+				projection.AppliedAtAnnotation:        "2026-01-01T00:00:00Z",
+			},
+		},
+		Type: corev1.SecretTypeDockerConfigJson,
+		Data: map[string][]byte{corev1.DockerConfigJsonKey: []byte(
+			`{"auths":{"ghcr.io":{"auth":"c3RhbGU="}}}`)},
+	}
+	c := testClient(t, source, stale, podUsing(namespace, copyName))
+	r := &controller.ProjectedSecretReconciler{
+		Client:            c,
+		Reader:            c,
+		OperatorNamespace: testOperatorNamespace,
+		Now:               func() time.Time { return fixedTime },
+	}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	err := c.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: copyName}, &corev1.Secret{})
+	if err == nil {
+		t.Fatalf("copy %s/%s still carries a credential its sources no longer provide", namespace, copyName)
+	}
+}
+
+// TestProjectedSweepContinuesPastASourceItCannotRead: one unreadable source used to
+// abort the whole sweep, so every other copy stayed stale and no unreferenced copy
+// was ever deleted again.
+func TestProjectedSweepContinuesPastASourceItCannotRead(t *testing.T) {
+	namespace := "workload"
+	brokenCopy := projection.Name([]string{"missing-source"})
+	orphanCopy := names.PullSecretPrefix + "deadbeef"
+	c := testClient(t,
+		projectedCopy(t, namespace, brokenCopy, []byte(`{"auths":{}}`), []string{"missing-source"}, ""),
+		projectedCopy(t, namespace, orphanCopy, []byte(`{"auths":{}}`), []string{"missing-source"}, ""),
+	)
+	r := &controller.ProjectedSecretReconciler{
+		Client:            c,
+		Reader:            c,
+		OperatorNamespace: testOperatorNamespace,
+		Now:               func() time.Time { return fixedTime },
+	}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile returned %v, want the unreadable source reported and the sweep continued", err)
+	}
+	err := c.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: orphanCopy}, &corev1.Secret{})
+	if err == nil {
+		t.Fatalf("unreferenced copy %s/%s survived a sweep that hit an unreadable source", namespace, orphanCopy)
+	}
+}

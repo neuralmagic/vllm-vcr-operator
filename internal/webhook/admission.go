@@ -66,3 +66,19 @@ func decodeObject(raw []byte, target any, kind string) error {
 	}
 	return nil
 }
+
+// resolveIdentity fills an object's name and namespace from the admission request
+// when the submitted object does not carry them.
+//
+// A Pod created from generateName has no name yet, and a namespaced object's
+// namespace is the request's by construction. Every webhook that uses the identity
+// (for provenance, events, or the projected pull Secret's name) must resolve it the
+// same way, or one of them names the wrong object.
+func resolveIdentity(meta *metav1.ObjectMeta, req *admissionv1.AdmissionRequest) {
+	if meta.Name == "" {
+		meta.Name = req.Name
+	}
+	if meta.Namespace == "" {
+		meta.Namespace = req.Namespace
+	}
+}

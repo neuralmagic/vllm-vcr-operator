@@ -194,7 +194,7 @@ func (r *VcrGpuClusterReconciler) reconcileEnvironment(ctx context.Context, env 
 		}
 		return ctrl.Result{}, err
 	}
-	if profiles.retry {
+	if profiles.retry() {
 		return ctrl.Result{RequeueAfter: r.RetryInterval}, nil
 	}
 	return ctrl.Result{}, nil
@@ -240,7 +240,7 @@ func (r *VcrGpuClusterReconciler) publishStatus(
 		}
 		// Event once, after the write the API server accepted.
 		r.recordConditionChanges(current, previous)
-		r.recordOpenNodeSelection(current)
+		r.recordOpenNodeSelection(current, previous)
 		return nil
 	})
 	if err != nil {
@@ -295,8 +295,14 @@ func (r *VcrGpuClusterReconciler) recordConditionChanges(env *vcrv1alpha1.VcrGpu
 // eligible. Kubernetes semantics say an empty selector matches everything, so the
 // device plugin will run on control-plane nodes too. That is allowed on purpose,
 // but it should be visible rather than inferred.
-func (r *VcrGpuClusterReconciler) recordOpenNodeSelection(env *vcrv1alpha1.VcrGpuCluster) {
+//
+// It fires once per spec generation: the warning is about the spec, so repeating it
+// for every unrelated status change would only bury the other events.
+func (r *VcrGpuClusterReconciler) recordOpenNodeSelection(env *vcrv1alpha1.VcrGpuCluster, previous vcrv1alpha1.VcrGpuClusterStatus) {
 	if r.Recorder == nil || len(env.Spec.NodeSelection.NodeSelector) > 0 {
+		return
+	}
+	if previous.ObservedGeneration == env.Generation {
 		return
 	}
 	r.Recorder.Event(env, corev1.EventTypeWarning, "AllNodesSelected",

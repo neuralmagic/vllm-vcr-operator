@@ -18,9 +18,6 @@ import (
 	"github.com/neuralmagic/vllm-vcr-operator/internal/profile"
 )
 
-// ConditionReady is the condition type a VcrGpuProfile reports.
-const conditionProfileReady = "Ready"
-
 // VcrGpuProfileReconciler resolves a namespace's profile selection against the
 // cluster's catalog.
 //
@@ -52,7 +49,7 @@ func (r *VcrGpuProfileReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			// No cluster configuration, nothing to resolve against. That is an operator
 			// state, not a mistake in this object.
 			return ctrl.Result{}, r.publish(ctx, selection, nil,
-				conditionProfileReady, metav1.ConditionFalse, "NoCluster",
+				vcrv1alpha1.ConditionReady, metav1.ConditionFalse, vcrv1alpha1.ReasonNoClusterConfigured,
 				fmt.Sprintf("no VcrGpuCluster named %q exists, so no catalog can be resolved against",
 					vcrv1alpha1.VcrGpuClusterNameDefault))
 		}
@@ -61,19 +58,19 @@ func (r *VcrGpuProfileReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	lookup := resolveSelection(cluster, selection.Spec.Profile)
 	if lookup.resolved == nil {
-		reason, unusable := "NotOffered", lookup.describeUnusable(selection.Spec.Profile)
+		reason, unusable := vcrv1alpha1.ReasonProfileNotOffered, lookup.describeUnusable(selection.Spec.Profile)
 		message := fmt.Sprintf("profile %q is not offered by the cluster's catalog; offered profiles: %s",
 			selection.Spec.Profile, describeOffered(lookup.offered))
 		if unusable != "" {
-			reason = "Unusable"
+			reason = vcrv1alpha1.ReasonProfileSelectionUnusable
 			message = fmt.Sprintf("profile %q is published by the cluster's catalog but cannot be used: %s",
 				selection.Spec.Profile, unusable)
 		}
 		return ctrl.Result{}, r.publish(ctx, selection, nil,
-			conditionProfileReady, metav1.ConditionFalse, reason, message)
+			vcrv1alpha1.ConditionReady, metav1.ConditionFalse, reason, message)
 	}
 	return ctrl.Result{}, r.publish(ctx, selection, lookup.resolved,
-		conditionProfileReady, metav1.ConditionTrue, "Resolved",
+		vcrv1alpha1.ConditionReady, metav1.ConditionTrue, vcrv1alpha1.ReasonProfileResolved,
 		fmt.Sprintf("profile %q resolves to %s", lookup.resolved.ID, lookup.resolved.Image))
 }
 

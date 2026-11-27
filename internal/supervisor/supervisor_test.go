@@ -784,3 +784,41 @@ func TestBackendLossAfterHealthyStillTerminates(t *testing.T) {
 		t.Fatal("supervisor did not terminate after the backend loss grace")
 	}
 }
+
+// TestStartupBudgetDefaultsWhenTheLossGraceIsUnset is the regression test for a
+// real failure: New defaulted the loss grace and the startup budget in one switch,
+// so a caller that left both unset got a startup budget of zero and the frontend
+// was killed about a millisecond after start — on every cold start, in production,
+// as a CrashLoopBackOff.
+func TestStartupBudgetDefaultsWhenTheLossGraceIsUnset(t *testing.T) {
+	cfg, _, backend := testConfig(t)
+	backend.setStatus(http.StatusServiceUnavailable) // the simulator is still starting
+	cfg.BackendLossGrace = 0                         // both budgets are left to New
+	cfg.BackendStartupTimeout = 0
+	s, err := supervisor.New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	codes := startSupervisor(t, s, ctx)
+
+	select {
+	case code := <-codes:
+		t.Fatalf("supervisor exited (code %d) in the first moments of a cold start: the default startup budget was not applied", code)
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// TestNegativeStartupBudgetIsRejectedWhateverTheLossGrace covers the other half of
+// the same bug: the loss-grace default used to shadow the validation of a negative
+// startup budget, so an impossible configuration was accepted silently.
+func TestNegativeStartupBudgetIsRejectedWhateverTheLossGrace(t *testing.T) {
+	cfg, _, _ := testConfig(t)
+	cfg.BackendLossGrace = 0
+	cfg.BackendStartupTimeout = -time.Second
+	if _, err := supervisor.New(cfg); err == nil {
+		t.Fatal("New accepted a negative startup budget, want a rejection naming the setting")
+	}
+}

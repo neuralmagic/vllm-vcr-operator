@@ -187,8 +187,8 @@ func TestReconcilePublishesSupportedVersionAndConditions(t *testing.T) {
 		t.Errorf("DevicePluginReady = %s/%s, want False/%s before kubelet reports the DaemonSet",
 			devicePlugin.Status, devicePlugin.Reason, vcrv1alpha1.ReasonDaemonSetNotReady)
 	}
-	if !strings.Contains(devicePlugin.Message, "0 of 0") {
-		t.Errorf("DevicePluginReady message = %q, want the desired and ready node counts", devicePlugin.Message)
+	if !strings.Contains(devicePlugin.Message, "no scheduled node") {
+		t.Errorf("DevicePluginReady message = %q, want it to say the DaemonSet reports no node yet", devicePlugin.Message)
 	}
 
 	ready := conditionOf(t, stored, vcrv1alpha1.ConditionReady)

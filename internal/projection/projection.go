@@ -96,18 +96,23 @@ func Merge(ctx context.Context, reader client.Reader, operatorNamespace string, 
 
 		contributed := false
 		for _, host := range hosts {
-			if !required && imageHost != "" && credentials.NormalizeHost(host) != imageHost {
+			// Credentials are compared and merged by their normalized identity: docker
+			// config documents spell one registry several ways ("docker.io",
+			// "https://index.docker.io/v1/"), and keying on the raw spelling would let
+			// two sources carrying the same registry through the ambiguity check.
+			normalized := credentials.NormalizeHost(host)
+			if !required && imageHost != "" && normalized != imageHost {
 				// A credential for another registry cannot authenticate this pull;
 				// copying it would spread unrelated credentials.
 				continue
 			}
-			if prior, taken := origin[host]; taken {
+			if prior, taken := origin[normalized]; taken {
 				return nil, fmt.Errorf(
 					"pull Secrets %s and %s both carry credentials for registry %q: the merged pull Secret would be ambiguous",
-					prior, key, host)
+					prior, key, normalized)
 			}
-			origin[host] = key.String()
-			auths[host] = entries[host]
+			origin[normalized] = key.String()
+			auths[normalized] = entries[host]
 			contributed = true
 		}
 		if contributed {
@@ -128,10 +133,30 @@ func Merge(ctx context.Context, reader client.Reader, operatorNamespace string, 
 	return &Merged{Payload: payload, Sources: contributing, ImageHost: imageHost, Required: required}, nil
 }
 
-// Ensure creates the projected copy in namespace, or updates it when its payload or
-// inputs changed. An identical copy is never rewritten.
-func Ensure(ctx context.Context, c client.Client, reader client.Reader, namespace, name string, merged *Merged, appliedTo string, now string) error {
-	key := types.NamespacedName{Namespace: namespace, Name: name}
+// Copy is one projected Secret to write: the merged payload, where it lives, and
+// the provenance it records. The inputs travel together because every one of them
+// ends up on the object, and a copy rebuilt from them must be identical.
+type Copy struct {
+	// Merged is the payload and the inputs that produced it.
+	Merged
+
+	// Namespace and Name locate the copy in the workload namespace.
+	Namespace string
+	Name      string
+
+	// AppliedTo names the workload the copy was created for. It is empty when the
+	// reconciler refreshes a copy it did not create in this pass.
+	AppliedTo string
+
+	// UpdatedAt is when the copy was last reconciled. It is recorded for operators
+	// and never used to decide whether a rewrite is needed.
+	UpdatedAt string
+}
+
+// Ensure creates the copy, or updates it when its payload or inputs changed. An
+// identical copy is never rewritten.
+func Ensure(ctx context.Context, c client.Client, reader client.Reader, copy Copy) error {
+	key := types.NamespacedName{Namespace: copy.Namespace, Name: copy.Name}
 	existing := &corev1.Secret{}
 	err := reader.Get(ctx, key, existing)
 	switch {
@@ -139,9 +164,9 @@ func Ensure(ctx context.Context, c client.Client, reader client.Reader, namespac
 		return fmt.Errorf("projected pull Secret %s cannot be read: %w", key, err)
 	case isNotFound(err):
 		secret := &corev1.Secret{
-			ObjectMeta: metav1ObjectMeta(namespace, name, merged, appliedTo, now),
+			ObjectMeta: copy.objectMeta(),
 			Type:       corev1.SecretTypeDockerConfigJson,
-			Data:       map[string][]byte{corev1.DockerConfigJsonKey: merged.Payload},
+			Data:       map[string][]byte{corev1.DockerConfigJsonKey: copy.Payload},
 		}
 		if err := c.Create(ctx, secret); err != nil {
 			return fmt.Errorf("project pull Secret %s: %w", key, err)
@@ -154,31 +179,64 @@ func Ensure(ctx context.Context, c client.Client, reader client.Reader, namespac
 			"a Secret named %s already exists but is not managed by %s: remove it or change the pull Secret names",
 			key, names.OperatorName)
 	}
-	if existing.Type == corev1.SecretTypeDockerConfigJson &&
-		existing.Data != nil && equalBytes(existing.Data[corev1.DockerConfigJsonKey], merged.Payload) &&
-		existing.Annotations[AppliedSourcesAnnotation] == strings.Join(sorted(merged.Sources), ",") {
+	if copy.unchanged(existing) {
 		return nil
 	}
+	copy.recordOn(existing)
+	if err := c.Update(ctx, existing); err != nil {
+		return fmt.Errorf("update projected pull Secret %s: %w", key, err)
+	}
+	return nil
+}
 
+// annotations are the inputs recorded on a copy: enough to rebuild its payload
+// without guessing, and nothing that a reader could turn into a credential.
+func (c Copy) annotations() map[string]string {
+	annotations := map[string]string{
+		AppliedSourcesAnnotation:   strings.Join(sorted(c.Sources), ","),
+		AppliedImageHostAnnotation: c.ImageHost,
+		AppliedExplicitAnnotation:  boolString(c.Required),
+		AppliedAtAnnotation:        c.UpdatedAt,
+	}
+	if c.AppliedTo != "" {
+		annotations[AppliedToAnnotation] = c.AppliedTo
+	}
+	return annotations
+}
+
+// objectMeta renders the metadata a newly created copy carries.
+func (c Copy) objectMeta() metav1.ObjectMeta {
+	return metav1.ObjectMeta{
+		Namespace:   c.Namespace,
+		Name:        c.Name,
+		Labels:      map[string]string{names.ManagedByLabel: names.OperatorName},
+		Annotations: c.annotations(),
+	}
+}
+
+// unchanged reports whether the existing copy already carries this payload from
+// these sources.
+func (c Copy) unchanged(existing *corev1.Secret) bool {
+	return existing.Type == corev1.SecretTypeDockerConfigJson &&
+		existing.Data != nil &&
+		equalBytes(existing.Data[corev1.DockerConfigJsonKey], c.Payload) &&
+		existing.Annotations[AppliedSourcesAnnotation] == strings.Join(sorted(c.Sources), ",")
+}
+
+// recordOn writes this copy's payload and inputs onto an existing Secret, leaving
+// annotations this operator does not own untouched.
+func (c Copy) recordOn(existing *corev1.Secret) {
 	if existing.Annotations == nil {
 		existing.Annotations = map[string]string{}
 	}
-	existing.Annotations[AppliedSourcesAnnotation] = strings.Join(sorted(merged.Sources), ",")
-	existing.Annotations[AppliedImageHostAnnotation] = merged.ImageHost
-	existing.Annotations[AppliedExplicitAnnotation] = boolString(merged.Required)
-	existing.Annotations[AppliedAtAnnotation] = now
-	if appliedTo != "" {
-		existing.Annotations[AppliedToAnnotation] = appliedTo
+	for key, value := range c.annotations() {
+		existing.Annotations[key] = value
 	}
 	existing.Type = corev1.SecretTypeDockerConfigJson
 	if existing.Data == nil {
 		existing.Data = map[string][]byte{}
 	}
-	existing.Data[corev1.DockerConfigJsonKey] = merged.Payload
-	if err := c.Update(ctx, existing); err != nil {
-		return fmt.Errorf("update projected pull Secret %s: %w", key, err)
-	}
-	return nil
+	existing.Data[corev1.DockerConfigJsonKey] = c.Payload
 }
 
 // SourcesOf returns the source names recorded on a projected copy, in the order
@@ -215,24 +273,6 @@ func IsProjected(secret *corev1.Secret) bool {
 }
 
 func isNotFound(err error) bool { return apierrors.IsNotFound(err) }
-
-func metav1ObjectMeta(namespace, name string, merged *Merged, appliedTo, now string) metav1.ObjectMeta {
-	annotations := map[string]string{
-		AppliedSourcesAnnotation:   strings.Join(sorted(merged.Sources), ","),
-		AppliedImageHostAnnotation: merged.ImageHost,
-		AppliedExplicitAnnotation:  boolString(merged.Required),
-		AppliedAtAnnotation:        now,
-	}
-	if appliedTo != "" {
-		annotations[AppliedToAnnotation] = appliedTo
-	}
-	return metav1.ObjectMeta{
-		Namespace:   namespace,
-		Name:        name,
-		Labels:      map[string]string{names.ManagedByLabel: names.OperatorName},
-		Annotations: annotations,
-	}
-}
 
 func sorted(values []string) []string {
 	ordered := append([]string(nil), values...)

@@ -153,7 +153,7 @@ func TestReconcilePublishesResolutionAndCondition(t *testing.T) {
 	if good.Status.Resolved == nil || good.Status.Resolved.ID != "poisson" {
 		t.Errorf("resolved = %+v", good.Status.Resolved)
 	}
-	if condition := findCondition(good.Status.Conditions, conditionProfileReady); condition == nil ||
+	if condition := findCondition(good.Status.Conditions, vcrv1alpha1.ConditionReady); condition == nil ||
 		condition.Status != metav1.ConditionTrue {
 		t.Errorf("Ready condition = %+v, want true", condition)
 	}
@@ -165,8 +165,8 @@ func TestReconcilePublishesResolutionAndCondition(t *testing.T) {
 	if bad.Status.Resolved != nil {
 		t.Errorf("an unknown profile resolved to %+v", bad.Status.Resolved)
 	}
-	condition := findCondition(bad.Status.Conditions, conditionProfileReady)
-	if condition == nil || condition.Status != metav1.ConditionFalse || condition.Reason != "NotOffered" {
+	condition := findCondition(bad.Status.Conditions, vcrv1alpha1.ConditionReady)
+	if condition == nil || condition.Status != metav1.ConditionFalse || condition.Reason != vcrv1alpha1.ReasonProfileNotOffered {
 		t.Fatalf("Ready condition = %+v", condition)
 	}
 	if !strings.Contains(condition.Message, "poisson") {

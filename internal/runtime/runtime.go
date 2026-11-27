@@ -164,9 +164,17 @@ func SyntheticDeviceOwners(containers []corev1.Container) []int {
 	return owners
 }
 
-// SyntheticDeviceQuantity returns a container's synthetic device allocation.
+// SyntheticDeviceQuantity returns a container's synthetic device allocation: the
+// requested quantity, or the limit when only a limit is set.
 func SyntheticDeviceQuantity(resources corev1.ResourceRequirements) (resource.Quantity, bool) {
-	return gpuQuantityOf(resources)
+	gpu := corev1.ResourceName(names.SyntheticResourceName)
+	if quantity, ok := resources.Requests[gpu]; ok {
+		return quantity, true
+	}
+	if quantity, ok := resources.Limits[gpu]; ok {
+		return quantity, true
+	}
+	return resource.Quantity{}, false
 }
 
 // findWorkloadContainer returns the index of the container whose GPU allocation is
@@ -195,18 +203,6 @@ func findWorkloadContainer(pod *corev1.Pod) (int, resource.Quantity, error) {
 	return owners[0], quantity, nil
 }
 
-// gpuQuantityOf returns the container's synthetic device allocation.
-func gpuQuantityOf(resources corev1.ResourceRequirements) (resource.Quantity, bool) {
-	gpu := corev1.ResourceName(names.SyntheticResourceName)
-	if quantity, ok := resources.Requests[gpu]; ok {
-		return quantity, true
-	}
-	if quantity, ok := resources.Limits[gpu]; ok {
-		return quantity, true
-	}
-	return resource.Quantity{}, false
-}
-
 // checkInitContainers rejects any init container that requests or limits the
 // synthetic device.
 //
@@ -221,7 +217,7 @@ func gpuQuantityOf(resources corev1.ResourceRequirements) (resource.Quantity, bo
 // unchanged.
 func checkInitContainers(pod *corev1.Pod) error {
 	for _, container := range pod.Spec.InitContainers {
-		if _, ok := gpuQuantityOf(container.Resources); !ok {
+		if _, ok := SyntheticDeviceQuantity(container.Resources); !ok {
 			continue
 		}
 		return fmt.Errorf(

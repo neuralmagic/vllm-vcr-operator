@@ -1,6 +1,9 @@
 package plan
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestPinnedImage(t *testing.T) {
 	tests := []struct {
@@ -65,5 +68,37 @@ func TestModelReference(t *testing.T) {
 				t.Errorf("Reference() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestPullSecretsOverrideReplacesTheCandidateList locks the rule admission, the
+// translator, and the reconciler all rely on: a profile-level Secret is not an
+// addition to the environment-wide list, it replaces it. Otherwise one profile's
+// private credential would be copied for every other profile's workloads.
+func TestPullSecretsOverrideReplacesTheCandidateList(t *testing.T) {
+	sources := PullSecrets{
+		Candidates: []string{"environment-wide"},
+		Overrides:  map[string]string{"quay.io/a/profile": "profile-only"},
+	}
+
+	choice := sources.For("quay.io/a/profile")
+	if len(choice.Names) != 1 || choice.Names[0] != "profile-only" {
+		t.Errorf("Names = %v, want only the profile's own Secret", choice.Names)
+	}
+	if choice.Override != "profile-only" {
+		t.Errorf("Override = %q, want the profile's own Secret", choice.Override)
+	}
+}
+
+// TestPullSecretsCandidatesAreTrimmedAndDeduplicated: the candidate list is
+// configuration, so blanks and repeats must not become Secret names to read.
+func TestPullSecretsCandidatesAreTrimmedAndDeduplicated(t *testing.T) {
+	sources := PullSecrets{Candidates: []string{" one ", "", "two", "one"}}
+	choice := sources.For("quay.io/a/profile")
+	if got, want := fmt.Sprint(choice.Names), "[one two]"; got != want {
+		t.Errorf("Names = %s, want %s", got, want)
+	}
+	if choice.Override != "" {
+		t.Errorf("Override = %q, want it empty when no profile names one", choice.Override)
 	}
 }

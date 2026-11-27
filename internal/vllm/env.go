@@ -20,7 +20,13 @@ type environmentSpec struct {
 	// presenceOnly marks a credential: only whether it is set matters, and its
 	// value is never read, stored, or reported.
 	presenceOnly bool
-	apply        func(p *parser, raw string) *Rejection
+	// apply applies the raw value. It returns the reason the value cannot be
+	// applied, empty on success.
+	//
+	// It does not build a rejection: the setting comes from the spec that owns the
+	// variable, so a rejection can never be published without naming what to
+	// change. That rule used to be upheld by each caller patching an empty Setting.
+	apply func(p *parser, raw string) string
 }
 
 // environmentSpecs is the modelled set of vLLM and Hub environment variables.
@@ -31,59 +37,59 @@ type environmentSpec struct {
 // reported as unmodelled so that the settings policy can decide about them
 // instead of this package silently ignoring them.
 func environmentSpecs() []environmentSpec {
-	str := func(target func(p *parser) **string) func(*parser, string) *Rejection {
-		return func(p *parser, raw string) *Rejection {
+	str := func(target func(p *parser) **string) func(*parser, string) string {
+		return func(p *parser, raw string) string {
 			*target(p) = strPtr(raw)
-			return nil
+			return ""
 		}
 	}
-	boolean := func(target func(p *parser) **bool, rawStyle func(string) (bool, error)) func(*parser, string) *Rejection {
-		return func(p *parser, raw string) *Rejection {
+	boolean := func(target func(p *parser) **bool, rawStyle func(string) (bool, error)) func(*parser, string) string {
+		return func(p *parser, raw string) string {
 			v, err := rawStyle(raw)
 			if err != nil {
-				return &Rejection{Setting: "", Value: raw, Reason: err.Error()}
+				return err.Error()
 			}
 			*target(p) = &v
-			return nil
+			return ""
 		}
 	}
-	integer := func(target func(p *parser) **int) func(*parser, string) *Rejection {
-		return func(p *parser, raw string) *Rejection {
+	integer := func(target func(p *parser) **int) func(*parser, string) string {
+		return func(p *parser, raw string) string {
 			v, err := strconv.Atoi(strings.TrimSpace(raw))
 			if err != nil {
-				return &Rejection{Value: raw, Reason: "not an integer"}
+				return "not an integer"
 			}
 			*target(p) = &v
-			return nil
+			return ""
 		}
 	}
 
 	return []environmentSpec{
 		// API authentication: the name is recorded, the value is not.
-		{variable: "VLLM_API_KEY", setting: SettingVLLMAPIKey, presenceOnly: true, apply: func(p *parser, _ string) *Rejection {
+		{variable: "VLLM_API_KEY", setting: SettingVLLMAPIKey, presenceOnly: true, apply: func(p *parser, _ string) string {
 			p.cfg.Auth.APIKeyRequired = true
 			p.cfg.Auth.APIKeySource = string(SettingVLLMAPIKey)
-			return nil
+			return ""
 		}},
 
 		{variable: "VLLM_HOST_IP", setting: SettingHost, apply: str(func(p *parser) **string { return &p.cfg.Server.Host })},
 		{variable: "VLLM_PORT", setting: SettingPort, apply: integer(func(p *parser) **int { return &p.cfg.Server.Port })},
 
 		{variable: "VLLM_LOGGING_LEVEL", setting: SettingLogLevel, apply: str(func(p *parser) **string { return &p.cfg.Observability.LogLevel })},
-		{variable: "VLLM_LOG_STATS_INTERVAL", setting: SettingLogStatsInterval, apply: func(p *parser, raw string) *Rejection {
+		{variable: "VLLM_LOG_STATS_INTERVAL", setting: SettingLogStatsInterval, apply: func(p *parser, raw string) string {
 			v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
 			if err != nil || v <= 0 {
-				return &Rejection{Setting: string(SettingLogStatsInterval), Value: raw, Reason: "not a positive number of seconds"}
+				return "not a positive number of seconds"
 			}
 			p.cfg.Observability.LogStatsIntervalSeconds = &v
-			return nil
+			return ""
 		}},
 
-		{variable: "VLLM_ENGINE_READY_TIMEOUT_S", setting: SettingEngineReadyTimeout, apply: func(p *parser, raw string) *Rejection {
-			return applyEnvInt(p, raw, SettingEngineReadyTimeout, &p.cfg.Lifecycle.EngineReadyTimeoutSeconds)
+		{variable: "VLLM_ENGINE_READY_TIMEOUT_S", setting: SettingEngineReadyTimeout, apply: func(p *parser, raw string) string {
+			return applyEnvInt(p, raw, &p.cfg.Lifecycle.EngineReadyTimeoutSeconds)
 		}},
-		{variable: "VLLM_WORKER_SHUTDOWN_TIMEOUT_SECONDS", setting: SettingWorkerShutdown, apply: func(p *parser, raw string) *Rejection {
-			return applyEnvInt(p, raw, SettingWorkerShutdown, &p.cfg.Lifecycle.WorkerShutdownTimeoutSeconds)
+		{variable: "VLLM_WORKER_SHUTDOWN_TIMEOUT_SECONDS", setting: SettingWorkerShutdown, apply: func(p *parser, raw string) string {
+			return applyEnvInt(p, raw, &p.cfg.Lifecycle.WorkerShutdownTimeoutSeconds)
 		}},
 
 		{variable: "VLLM_TARGET_DEVICE", setting: SettingTargetDevice, apply: str(func(p *parser) **string { return &p.cfg.Device.TargetDevice })},
@@ -125,11 +131,23 @@ func environmentSpecs() []environmentSpec {
 	}
 }
 
+// rejection renders a rejection for this variable.
+//
+// The setting is the variable name, never the modelled setting it feeds: a value that
+// arrived in the container environment is changed by editing the environment, so the
+// variable is what the message has to name. A credential's value is never quoted back.
+func (s environmentSpec) rejection(value, reason string) Rejection {
+	if s.presenceOnly {
+		value = ""
+	}
+	return Rejection{Setting: s.variable, Value: value, Reason: reason}
+}
+
 // ignoreEnvValue is the apply step for a variable with no modelled setting
 // semantics: it is recorded as present (so it is not rejected as unknown) and
 // forwarded unchanged by the runtime.
-func ignoreEnvValue() func(*parser, string) *Rejection {
-	return func(*parser, string) *Rejection { return nil }
+func ignoreEnvValue() func(*parser, string) string {
+	return func(*parser, string) string { return "" }
 }
 
 // hfTokenEnvVars are the Hub credential spellings the transformers stack reads.
@@ -155,10 +173,10 @@ func (p *parser) applyEnvironment() {
 			variable:     tokenVar,
 			setting:      SettingHFToken,
 			presenceOnly: true,
-			apply: func(p *parser, _ string) *Rejection {
+			apply: func(p *parser, _ string) string {
 				p.cfg.Auth.HuggingFaceTokenEnvVar = tokenVar
 				p.cfg.Environment.HuggingFaceTokenEnvVar = tokenVar
-				return nil
+				return ""
 			},
 		}
 	}
@@ -178,25 +196,20 @@ func (p *parser) applyEnvironment() {
 				// An empty credential is not a credential.
 				continue
 			}
-			if rej := spec.apply(p, ""); rej != nil {
-				p.errs = append(p.errs, *rej)
+			if reason := spec.apply(p, ""); reason != "" {
+				p.errs = append(p.errs, spec.rejection("", reason))
 				continue
 			}
 			p.record(spec.setting)
 			continue
 		}
 		if !resolved {
-			p.errs = append(p.errs, Rejection{
-				Setting: string(Setting(spec.variable)),
-				Reason:  "the variable's value comes from a reference the Pod spec does not resolve, so the setting cannot be resolved",
-			})
+			p.errs = append(p.errs, spec.rejection("",
+				"the variable's value comes from a reference the Pod spec does not resolve, so the setting cannot be resolved"))
 			continue
 		}
-		if rej := spec.apply(p, raw); rej != nil {
-			if rej.Setting == "" {
-				rej.Setting = string(Setting(spec.variable))
-			}
-			p.errs = append(p.errs, *rej)
+		if reason := spec.apply(p, raw); reason != "" {
+			p.errs = append(p.errs, spec.rejection(raw, reason))
 			continue
 		}
 		p.record(spec.setting)
@@ -217,13 +230,13 @@ func (p *parser) envValue(env corev1.EnvVar) (string, bool) {
 }
 
 // applyEnvInt parses an integer environment variable.
-func applyEnvInt(p *parser, raw string, setting Setting, target **int) *Rejection {
+func applyEnvInt(p *parser, raw string, target **int) string {
 	v, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil {
-		return &Rejection{Setting: string(setting), Value: raw, Reason: "not an integer"}
+		return "not an integer"
 	}
 	*target = &v
-	return nil
+	return ""
 }
 
 // envBoolVLLM parses the "1"/"true" style booleans vllm/envs.py uses.

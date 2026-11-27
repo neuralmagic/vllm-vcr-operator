@@ -8,7 +8,9 @@ package v1alpha1
 // the published API surface: an operator consumer may match on it.
 const (
 	// ConditionReady is true only when every configured profile has usable
-	// metadata and the device plugin runs on every node it is scheduled for.
+	// metadata and the device plugin runs on every node it is scheduled for. A
+	// VcrGpuProfile reports the same type for its own resolution: either way, the
+	// answer to "can simulated workloads run here?" is the same question.
 	ConditionReady = "Ready"
 	// ConditionProfilesReconciled reports whether status.profiles is a complete,
 	// usable catalog for admission.
@@ -44,4 +46,17 @@ const (
 	// ReasonDaemonSetNotReady: the device plugin is missing or not ready on at
 	// least one scheduled node.
 	ReasonDaemonSetNotReady = "DaemonSetNotReady"
+
+	// ReasonProfileResolved: the VcrGpuProfile's selection names an identity the
+	// catalog offers, so admission pins the namespace to it.
+	ReasonProfileResolved = "Resolved"
+	// ReasonProfileNotOffered: the catalog publishes no such identity. Only a spec
+	// change (an id the catalog lists) fixes it.
+	ReasonProfileNotOffered = "NotOffered"
+	// ReasonProfileSelectionUnusable: the catalog offers the identity but its
+	// recording violates the profile image contract.
+	ReasonProfileSelectionUnusable = "Unusable"
+	// ReasonNoClusterConfigured: no VcrGpuCluster exists, so there is no catalog to
+	// resolve against. It is an operator state, not a mistake in the selection.
+	ReasonNoClusterConfigured = "NoCluster"
 )

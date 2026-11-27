@@ -60,6 +60,10 @@ make manifests generate         # regenerate CRD/deepcopy after API edits
 | `internal/deviceplugin` | kubelet device-plugin gRPC server |
 | `internal/supervisor` | frontend/simulator lifecycle supervision |
 | `internal/registry` | OCI profile metadata/digest resolution |
+| `internal/credentials` | docker config format, registry-host identity, authenticators |
+| `internal/pullsecrets` | which pull Secrets apply to a profile image |
+| `internal/projection` | projected pull-secret copies, shared by admission and the reconciler |
+| `internal/rejection` | the one structured rejection admission reports |
 | `cmd/*` | binaries (manager, deviceplugin, supervisor, profileexport) |
 | `config/` | kustomize manifests, CRD, RBAC, webhook config |
 | `test/e2e` | envtest acceptance tests |

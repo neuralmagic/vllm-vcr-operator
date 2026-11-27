@@ -123,7 +123,7 @@ func TestProvisionerRunsThePinnedProfileEntrypoint(t *testing.T) {
 // provenance, sizing, placement intent, and pull secrets are already resolved.
 func TestPlanCarriesEverythingTheRuntimeNeeds(t *testing.T) {
 	env := testEnvironment()
-	env.ProfilePullSecrets = map[string]string{testImage: "private-profile-pull"}
+	env.PullSecrets.Overrides = map[string]string{testImage: "private-profile-pull"}
 	admission, err := runTranslate(t, translateCase{name: "minimal"}, env)
 	mustAccept(t, admission, err)
 
