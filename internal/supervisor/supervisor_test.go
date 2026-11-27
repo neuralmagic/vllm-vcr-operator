@@ -822,3 +822,53 @@ func TestNegativeStartupBudgetIsRejectedWhateverTheLossGrace(t *testing.T) {
 		t.Fatal("New accepted a negative startup budget, want a rejection naming the setting")
 	}
 }
+
+// TestShutdownDoesNotWaitForAForkedGrandchild covers the failure that made CI red.
+//
+// The frontend's direct child exited on SIGTERM, but a process it had forked still
+// held stdout, so cmd.Wait blocked reading the output pipe. The supervisor then
+// waited the whole reap budget and reported a frontend that "did not exit within the
+// shutdown timeout and was killed" — for a frontend that had exited cleanly and on
+// time. A Python worker pool that forks is enough to trigger it.
+//
+// The command below is the same shape: the shell exits on SIGTERM while the child it
+// backgrounded keeps the inherited stdout open.
+func TestShutdownDoesNotWaitForAForkedGrandchild(t *testing.T) {
+	stdout := &syncBuffer{}
+	cfg, _, _ := testConfig(t)
+	cfg.Command = []string{"/bin/sh", "-c", `printf 'ready\n'; sleep 5 & sleep 5`}
+	cfg.Stdout = stdout
+	cfg.ShutdownTimeout = 2 * time.Second
+	s, err := supervisor.New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	codes := startSupervisor(t, s, ctx)
+
+	// Wait for the frontend to be running, so the shutdown below is a real one.
+	deadline := time.Now().Add(5 * time.Second)
+	for stdout.String() == "" && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if stdout.String() == "" {
+		t.Fatal("the frontend never ran")
+	}
+
+	start := time.Now()
+	cancel()
+	code := waitForExit(t, codes, 8*time.Second)
+	elapsed := time.Since(start)
+
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0: the frontend exited cleanly and within its budget", code)
+	}
+	// The child exits immediately; only the output grace (1s) can legitimately pass
+	// before the supervisor stops reading. The reap budget is 10s, so a regression
+	// shows up as a run of ~10s.
+	if elapsed > 3*time.Second {
+		t.Errorf("shutdown took %s, want the supervisor to stop waiting for the forked child's output", elapsed)
+	}
+}

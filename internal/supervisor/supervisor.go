@@ -103,6 +103,12 @@ const (
 	// be reaped, so that a wedged child cannot hang the container.
 	reapTimeout = 10 * time.Second
 
+	// childOutputGrace bounds how long Wait keeps reading the frontend's output
+	// after the frontend itself has exited. A forked grandchild that inherited
+	// stdout can hold the pipe open far longer than the shutdown budget; its output
+	// is not the frontend's, so the supervisor stops reading instead of waiting.
+	childOutputGrace = time.Second
+
 	// healthProbeTimeout bounds a single health request. It is much shorter than
 	// a kubelet probe timeout so that a hung endpoint cannot stall the poll loop
 	// for long, and it is cancelled with the supervisor context so shutdown never
@@ -323,6 +329,12 @@ func (s *Supervisor) Run(ctx context.Context) (int, error) {
 	cmd.Dir = s.cfg.Dir
 	cmd.Stdout = s.cfg.Stdout
 	cmd.Stderr = s.cfg.Stderr
+	// The output sinks are io.Writers, so the runtime installs a pipe and copies it
+	// until every writer closes it — including a process the frontend forked that
+	// inherited stdout and outlived it. Without a bound, Wait blocks until such a
+	// process exits, and shutdown reports a frontend that "did not exit within the
+	// shutdown timeout and was killed" even though it exited cleanly.
+	cmd.WaitDelay = childOutputGrace
 	if err := cmd.Start(); err != nil {
 		return exitCodeFailure, fmt.Errorf("supervisor: start frontend %q: %w", strings.Join(s.cfg.Command, " "), err)
 	}
@@ -696,6 +708,12 @@ func exitCode(err error) int {
 	}
 	var ee *exec.ExitError
 	if !errors.As(err, &ee) {
+		// A child that exited successfully but left a process holding its output makes
+		// Wait return exec.ErrWaitDelay instead of nil. That is still a clean exit of
+		// the frontend, so it must not be reported as a crash.
+		if errors.Is(err, exec.ErrWaitDelay) {
+			return 0
+		}
 		return exitCodeFailure
 	}
 	if code := ee.ExitCode(); code >= 0 {
